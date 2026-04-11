@@ -86,12 +86,7 @@ func defaultVoice(pt tts.ProviderType, alert bool) string {
 			return "Deep_Voice_Man"
 		}
 	}
-	switch pt {
-	case tts.ProviderGroq:
-		return "daniel"
-	default:
-		return "Friendly_Person"
-	}
+	return tts.RandomVoice(pt)
 }
 
 func printVoices(pt tts.ProviderType) {

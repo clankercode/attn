@@ -1,5 +1,12 @@
 package tts
 
+import (
+	"math/rand"
+	"time"
+)
+
+var randomSource = rand.New(rand.NewSource(time.Now().UnixNano()))
+
 var VoiceListGroq = []string{
 	"autumn",
 	"diana",
@@ -46,4 +53,15 @@ func ValidateVoice(provider ProviderType, voice string) bool {
 		return false
 	}
 	return true
+}
+
+func RandomVoice(provider ProviderType) string {
+	voices := VoiceListMinimax
+	if provider == ProviderGroq {
+		voices = VoiceListGroq
+	}
+	if len(voices) == 0 {
+		return ""
+	}
+	return voices[randomSource.Intn(len(voices))]
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -74,9 +75,9 @@ func init() {
 
 func Parse(args []string) (Config, error) {
 	fs := flag.NewFlagSet("attn-tool", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
 	fs.Usage = func() {
-		println("Usage: attn [options] \"message\"")
-		fs.PrintDefaults()
+		writeHelp(os.Stdout)
 	}
 
 	var (
@@ -108,7 +109,7 @@ func Parse(args []string) (Config, error) {
 
 	outPath := *output
 	if outPath == "" {
-		ts := time.Now().Unix()
+		ts := time.Now().UnixNano()
 		home, _ := os.UserHomeDir()
 		ext := "mp3"
 		if providerVal == "groq" {
@@ -130,4 +131,29 @@ func Parse(args []string) (Config, error) {
 		DryRun:     *dryRun,
 		Wait:       *wait,
 	}, nil
+}
+
+func writeHelp(w io.Writer) {
+	fmt.Fprint(w, `attn speaks text and saves the generated audio.
+
+Examples:
+  attn "Build finished."
+  attn --wait "test two."
+  attn --provider groq --voice daniel "Heads up."
+
+Common flags:
+  --provider minimax|groq   Choose the TTS backend
+  --voice NAME              Pick a specific voice
+  --wait                    Queue behind current playback
+  --fg                      Block until playback finishes
+  --polish                  Add a leading pause and final punctuation
+  --dry-run                 Skip synthesis/playback side effects
+  --list-voices             Show voices for the selected provider
+  -o PATH                   Save output to a specific file
+
+Defaults:
+  provider: minimax
+  voice: random for normal playback, fixed alert voice for --alert
+  output: ~/.tts-output/<unique timestamp>.mp3 (or .wav for groq)
+`)
 }
