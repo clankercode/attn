@@ -36,8 +36,13 @@ func Run(args []string) {
 	finalAudio := audioOut.Data
 
 	if cfg.Alert {
-		alertTone := audio.AlertTone()
-		finalAudio, _ = audio.ConcatWAV(alertTone, finalAudio)
+		alertFile, err := os.CreateTemp("", "attn-alert-*.wav")
+		if err == nil {
+			alertFile.Write(audio.AlertTone())
+			alertFile.Close()
+			defer os.Remove(alertFile.Name())
+			audio.PlayMpv(alertFile.Name())
+		}
 	}
 
 	doPlay := true

@@ -18,12 +18,12 @@ func PlayAndSave(data []byte, outputPath string, doPlay bool) error {
 	}
 
 	if doPlay {
-		return plaympv(outputPath)
+		return PlayMpv(outputPath)
 	}
 	return nil
 }
 
-func plaympv(path string) error {
+func PlayMpv(path string) error {
 	cmd := exec.Command("mpv", "--quiet", "--no-terminal", path)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
