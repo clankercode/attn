@@ -4,21 +4,17 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/mp3"
-	"github.com/faiface/beep/speaker"
 	"github.com/faiface/beep/wav"
-)
-
-var (
-	speakerMu         sync.Mutex
-	speakerSampleRate beep.SampleRate
 )
 
 func Duration(data []byte) (string, error) {
@@ -76,61 +72,126 @@ func playFile(path string) error {
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 
-	var streamer beep.StreamSeekCloser
-	var format beep.Format
+	streamer, format, err := decodeAudio(f, path)
+	if err != nil {
+		return err
+	}
+	defer streamer.Close()
 
+	sink, err := detectPlaybackSink()
+	if err != nil {
+		return err
+	}
+
+	return streamToSink(streamer, format, sink)
+}
+
+func decodeAudio(r io.ReadCloser, path string) (beep.StreamSeekCloser, beep.Format, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".mp3":
-		streamer, format, err = mp3.Decode(f)
+		streamer, format, err := mp3.Decode(r)
+		if err != nil {
+			return nil, beep.Format{}, fmt.Errorf("decode: %w", err)
+		}
+		return streamer, format, nil
 	case ".wav":
-		streamer, format, err = wav.Decode(f)
+		streamer, format, err := wav.Decode(r)
+		if err != nil {
+			return nil, beep.Format{}, fmt.Errorf("decode: %w", err)
+		}
+		return streamer, format, nil
 	default:
-		f.Close()
-		return fmt.Errorf("unsupported audio format: %s", ext)
+		return nil, beep.Format{}, fmt.Errorf("unsupported audio format: %s", ext)
 	}
+}
 
+func detectPlaybackSink() (string, error) {
+	for _, name := range []string{"pw-play", "pacat", "paplay"} {
+		if _, err := exec.LookPath(name); err == nil {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("no supported playback sink found (tried pw-play, pacat, paplay)")
+}
+
+func playbackCommand(sink string, sampleRate beep.SampleRate) (string, []string) {
+	rate := strconv.Itoa(int(sampleRate))
+	switch sink {
+	case "pw-play":
+		return sink, []string{"--raw", "--format", "s16", "--rate", rate, "--channels", "2", "--latency", "50ms", "-"}
+	case "paplay":
+		return sink, []string{"--raw", "--format=s16le", "--rate=" + rate, "--channels=2", "--latency-msec=50", "-"}
+	default:
+		return sink, []string{"--raw", "--format=s16le", "--rate=" + rate, "--channels=2", "--latency-msec=50", "-"}
+	}
+}
+
+func streamToSink(streamer beep.Streamer, format beep.Format, sink string) error {
+	name, args := playbackCommand(sink, format.SampleRate)
+	cmd := exec.Command(name, args...)
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		f.Close()
-		return fmt.Errorf("decode: %w", err)
+		return fmt.Errorf("open playback stdin: %w", err)
+	}
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Start(); err != nil {
+		stdin.Close()
+		return fmt.Errorf("start %s: %w", name, err)
 	}
 
-	if err := initSpeaker(format); err != nil {
-		streamer.Close()
-		f.Close()
-		return fmt.Errorf("speaker init: %w", err)
+	writeErr := streamPCM(streamer, stdin)
+	closeErr := stdin.Close()
+	waitErr := cmd.Wait()
+
+	if writeErr != nil {
+		return writeErr
 	}
-
-	done := make(chan struct{})
-	speaker.Play(streamer)
-	speaker.Play(beep.Callback(func() { close(done) }))
-	<-done
-
-	streamer.Close()
-	f.Close()
-
+	if closeErr != nil {
+		return fmt.Errorf("close playback stdin: %w", closeErr)
+	}
+	if waitErr != nil {
+		return fmt.Errorf("wait for %s: %w", name, waitErr)
+	}
 	return nil
 }
 
-func initSpeaker(format beep.Format) error {
-	speakerMu.Lock()
-	defer speakerMu.Unlock()
-
-	if speakerSampleRate == format.SampleRate {
-		return nil
+func streamPCM(streamer beep.Streamer, w io.Writer) error {
+	buf := make([][2]float64, 2048)
+	for {
+		n, ok := streamer.Stream(buf)
+		if n > 0 {
+			if _, err := w.Write(samplesToPCM16LE(buf[:n])); err != nil {
+				return fmt.Errorf("write PCM: %w", err)
+			}
+		}
+		if !ok {
+			return nil
+		}
 	}
-	if err := speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/2)); err != nil {
-		return err
-	}
-	speakerSampleRate = format.SampleRate
-	return nil
 }
 
-func streamerWithDone(streamer beep.Streamer, done chan<- struct{}) beep.Streamer {
-	return beep.Seq(streamer, beep.Callback(func() {
-		close(done)
-	}))
+func samplesToPCM16LE(samples [][2]float64) []byte {
+	out := make([]byte, len(samples)*4)
+	for i, sample := range samples {
+		left := pcm16(sample[0])
+		right := pcm16(sample[1])
+		binary.LittleEndian.PutUint16(out[i*4:], uint16(left))
+		binary.LittleEndian.PutUint16(out[i*4+2:], uint16(right))
+	}
+	return out
+}
+
+func pcm16(v float64) int16 {
+	v = math.Max(-1, math.Min(1, v))
+	if v <= -1 {
+		return -32768
+	}
+	return int16(math.Round(v * 32767))
 }
 
 func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLock bool) error {

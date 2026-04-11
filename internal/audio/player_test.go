@@ -1,52 +1,60 @@
 package audio
 
 import (
+	"encoding/binary"
 	"testing"
-
-	"github.com/faiface/beep"
 )
 
-type finiteStreamer struct {
-	remaining int
-}
+func TestPlaybackCommandForPipeWire(t *testing.T) {
+	name, args := playbackCommand("pw-play", 32000)
 
-func (s *finiteStreamer) Stream(samples [][2]float64) (int, bool) {
-	if s.remaining <= 0 {
-		return 0, false
+	if name != "pw-play" {
+		t.Fatalf("expected pw-play, got %q", name)
 	}
-	if len(samples) > s.remaining {
-		n := s.remaining
-		s.remaining = 0
-		return n, true
+	want := []string{"--raw", "--format", "s16", "--rate", "32000", "--channels", "2", "--latency", "50ms", "-"}
+	if len(args) != len(want) {
+		t.Fatalf("expected %d args, got %d: %#v", len(want), len(args), args)
 	}
-	s.remaining -= len(samples)
-	return len(samples), true
-}
-
-func (s *finiteStreamer) Err() error { return nil }
-
-func TestStreamerWithDoneClosesAfterSourceEnds(t *testing.T) {
-	done := make(chan struct{})
-	streamer := streamerWithDone(&finiteStreamer{remaining: 2}, done)
-	samples := make([][2]float64, 4)
-
-	if _, ok := streamer.Stream(samples[:1]); !ok {
-		t.Fatal("expected streamer to remain active before source ends")
-	}
-	select {
-	case <-done:
-		t.Fatal("done closed before source ended")
-	default:
-	}
-
-	streamer.Stream(samples)
-	streamer.Stream(samples)
-
-	select {
-	case <-done:
-	default:
-		t.Fatal("expected done to close after source ended")
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("arg %d: expected %q, got %q", i, want[i], args[i])
+		}
 	}
 }
 
-var _ beep.Streamer = (*finiteStreamer)(nil)
+func TestPlaybackCommandForPulseAudio(t *testing.T) {
+	name, args := playbackCommand("pacat", 44100)
+
+	if name != "pacat" {
+		t.Fatalf("expected pacat, got %q", name)
+	}
+	want := []string{"--raw", "--format=s16le", "--rate=44100", "--channels=2", "--latency-msec=50", "-"}
+	if len(args) != len(want) {
+		t.Fatalf("expected %d args, got %d: %#v", len(want), len(args), args)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("arg %d: expected %q, got %q", i, want[i], args[i])
+		}
+	}
+}
+
+func TestSamplesToPCM16LE(t *testing.T) {
+	pcm := samplesToPCM16LE([][2]float64{{0.0, 0.5}, {-1.0, 1.0}})
+
+	if len(pcm) != 8 {
+		t.Fatalf("expected 8 bytes, got %d", len(pcm))
+	}
+	got := []int16{
+		int16(binary.LittleEndian.Uint16(pcm[0:2])),
+		int16(binary.LittleEndian.Uint16(pcm[2:4])),
+		int16(binary.LittleEndian.Uint16(pcm[4:6])),
+		int16(binary.LittleEndian.Uint16(pcm[6:8])),
+	}
+	want := []int16{0, 16384, -32768, 32767}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sample %d: expected %d, got %d", i, want[i], got[i])
+		}
+	}
+}
