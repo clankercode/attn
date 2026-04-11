@@ -103,7 +103,8 @@ func playFile(path string) error {
 	}
 
 	done := make(chan struct{})
-	speaker.Play(streamerWithDone(streamer, done))
+	speaker.Play(streamer)
+	speaker.Play(beep.Callback(func() { close(done) }))
 	<-done
 
 	streamer.Close()
@@ -119,7 +120,7 @@ func initSpeaker(format beep.Format) error {
 	if speakerSampleRate == format.SampleRate {
 		return nil
 	}
-	if err := speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10)); err != nil {
+	if err := speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/2)); err != nil {
 		return err
 	}
 	speakerSampleRate = format.SampleRate
