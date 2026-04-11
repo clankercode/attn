@@ -3,32 +3,33 @@
 build:
     go build -o attn-tool ./cmd/attn
 
-# Install symlinks to /usr/local/bin (requires sudo)
+# Install symlinks to ~/.local/bin
 install:
-    sudo install -d /usr/local/bin
-    sudo ln -sf {{ justfile_directory() }}/attn-tool /usr/local/bin/attn
-    sudo ln -sf {{ justfile_directory() }}/attn-tool /usr/local/bin/tts
+    mkdir -p ~/.local/bin
+    ln -sf {{ justfile_directory() }}/attn-tool ~/.local/bin/attn
+    ln -sf {{ justfile_directory() }}/attn-tool ~/.local/bin/tts
 
 # Remove symlinks
 uninstall:
-    sudo rm -f /usr/local/bin/attn /usr/local/bin/tts
+    rm -f ~/.local/bin/attn ~/.local/bin/tts
 
-# Speak text (keys loaded from ~/.config/attn/config.yaml)
+# Speak text
+# Usage: just speak "message"
 speak text:
     ./attn-tool "{{ text }}"
 
 # Speak with alert mode
 alert text:
-    ./attn-tool "{{ text }}" --alert
+    ./attn-tool --alert "{{ text }}"
 
-# Test groq (may require accepting terms at https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english)
+# Test groq (requires accepting terms: https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english)
 test-groq:
-    ./attn-tool "Testing groq TTS" --provider groq -o /tmp/attn-test-groq.mp3
+    ./attn-tool -o /tmp/attn-test-groq.mp3 --provider groq "Testing groq TTS"
 
-# Test minimax
+# Test minimax (requires API key with TTS access)
 test-minimax:
-    ./attn-tool "Testing minimax TTS" --provider minimax -o /tmp/attn-test-minimax.mp3
+    ./attn-tool -o /tmp/attn-test-minimax.mp3 --provider minimax "Testing minimax TTS"
 
-# Verify help output
+# Verify build and help
 test: build
     ./attn-tool --help

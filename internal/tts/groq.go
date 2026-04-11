@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 )
 
 type groqProvider struct {
@@ -60,6 +61,20 @@ func (g *groqProvider) Synthesize(ctx context.Context, text, voice, model string
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("groq API error: %s — %s", resp.Status, string(bodyBytes))
+	}
+	defer resp.Body.Close()
+
+	os.WriteFile("/tmp/attn-groq-debug.txt", []byte(fmt.Sprintf("status=%d contentType=%s\n", resp.StatusCode, resp.Header.Get("Content-Type"))), 0644)
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("groq API error: %s — %s", resp.Status, string(bodyBytes))
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if strings.Contains(contentType, "application/json") {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("groq API returned JSON (likely error): %s", string(bodyBytes))
 	}
 
 	data, err := io.ReadAll(resp.Body)
