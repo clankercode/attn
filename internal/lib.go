@@ -14,20 +14,25 @@ import (
 func Run(args []string) {
 	cfg := cli.Parse(args)
 
+	providerType := tts.ProviderType(cfg.Provider)
+
+	if cfg.ListVoices {
+		printVoices(providerType)
+		return
+	}
+
 	if cfg.Text == "" {
 		fmt.Fprintln(os.Stderr, "error: no text provided")
 		os.Exit(1)
 	}
 
 	text := cfg.Text
-	polished := ""
 	if cfg.Polish {
-		polished = polishText(text)
+		polished := polishText(text)
 		text = polished
 		fmt.Printf("[polished] %s → %s\n", cfg.Text, text)
 	}
 
-	providerType := tts.ProviderType(cfg.Provider)
 	provider := tts.NewProvider(providerType, cfg.Voice, cfg.Model)
 
 	voice := cfg.Voice
@@ -68,20 +73,33 @@ func defaultVoice(pt tts.ProviderType, alert bool) string {
 		case tts.ProviderGroq:
 			return "austin"
 		default:
-			return "male-tianmei"
+			return "Deep_Voice_Man"
 		}
 	}
 	switch pt {
 	case tts.ProviderGroq:
 		return "austin"
 	default:
-		return "female-shaonv"
+		return "Friendly_Person"
 	}
 }
 
-func isFileOutput(path string) bool {
-	fi, err := os.Stat(path)
-	return err == nil && fi.Mode().IsRegular()
+func printVoices(pt tts.ProviderType) {
+	switch pt {
+	case tts.ProviderGroq:
+		fmt.Println("Groq voices (canopylabs/orpheus-v1-english):")
+		for _, v := range tts.VoiceListGroq {
+			fmt.Printf("  %s\n", v)
+		}
+	case tts.ProviderMinimax:
+		fmt.Println("MiniMax voices (speech-2.8-hd):")
+		for _, v := range tts.VoiceListMinimax {
+			fmt.Printf("  %s\n", v)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "unknown provider: %s\n", pt)
+		os.Exit(1)
+	}
 }
 
 func polishText(text string) string {

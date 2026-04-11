@@ -24,14 +24,15 @@ type MinimaxConfig struct {
 }
 
 type Config struct {
-	Text     string
-	Output   string
-	Provider string
-	Voice    string
-	Model    string
-	Alert    bool
-	Fg       bool
-	Polish   bool
+	Text       string
+	Output     string
+	Provider   string
+	Voice      string
+	Model      string
+	Alert      bool
+	Fg         bool
+	Polish     bool
+	ListVoices bool
 }
 
 var globalConfig *ConfigFile
@@ -77,13 +78,14 @@ func Parse(args []string) Config {
 	}
 
 	var (
-		output   = fs.String("o", "", "Output file path (default: ~/.tts-output/<timestamp>.mp3)")
-		provider = fs.String("provider", os.Getenv("TTS_PROVIDER"), "Provider: minimax or groq")
-		voice    = fs.String("voice", "", "Voice ID")
-		model    = fs.String("model", "", "Model ID (provider-specific)")
-		alert    = fs.Bool("alert", false, "Prepend alert tone and use alert voice")
-		fg       = fs.Bool("fg", false, "Play in foreground (blocking)")
-		polish   = fs.Bool("polish", false, "Add speech polish (leading pause, trailing punctuation)")
+		output     = fs.String("o", "", "Output file path (default: ~/.tts-output/<timestamp>.mp3)")
+		provider   = fs.String("provider", os.Getenv("TTS_PROVIDER"), "Provider: minimax or groq")
+		voice      = fs.String("voice", "", "Voice ID")
+		model      = fs.String("model", "", "Model ID (provider-specific)")
+		alert      = fs.Bool("alert", false, "Prepend alert tone and use alert voice")
+		fg         = fs.Bool("fg", false, "Play in foreground (blocking)")
+		polish     = fs.Bool("polish", false, "Add speech polish (leading pause, trailing punctuation)")
+		listVoices = fs.Bool("list-voices", false, "List available voices for the provider")
 	)
 
 	fs.Parse(args)
@@ -110,13 +112,14 @@ func Parse(args []string) Config {
 	}
 
 	return Config{
-		Text:     text,
-		Output:   outPath,
-		Provider: providerVal,
-		Voice:    *voice,
-		Model:    *model,
-		Alert:    *alert,
-		Fg:       *fg,
-		Polish:   *polish,
+		Text:       text,
+		Output:     outPath,
+		Provider:   providerVal,
+		Voice:      *voice,
+		Model:      *model,
+		Alert:      *alert,
+		Fg:         *fg,
+		Polish:     *polish,
+		ListVoices: *listVoices,
 	}
 }
