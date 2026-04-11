@@ -3,6 +3,7 @@ package tts
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,7 +21,7 @@ func newMinimax(voice, model string) Provider {
 		voice = "female-shaonv"
 	}
 	if model == "" {
-		model = "speech-2.8-turbo"
+		model = "speech-2.8-hd"
 	}
 	return &minimaxProvider{voice: voice, model: model}
 }
@@ -62,12 +63,44 @@ func (m *minimaxProvider) Synthesize(ctx context.Context, text, voice, model str
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		var errResp map[string]any
+		json.Unmarshal(bodyBytes, &errResp)
+		if msg, ok := errResp["base_resp"].(map[string]any); ok {
+			if code, ok := msg["status_code"].(float64); ok && code != 0 {
+				return nil, fmt.Errorf("minimax API error %d: %v", int(code), msg["status_msg"])
+			}
+		}
 		return nil, fmt.Errorf("minimax API error: %s", resp.Status)
+	}
+
+	var result struct {
+		Data struct {
+			Audio string `json:"audio"`
+		} `json:"data"`
+		BaseResp struct {
+			StatusCode int    `json:"status_code"`
+			StatusMsg  string `json:"status_msg"`
+		} `json:"base_resp"`
 	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	return &AudioOutput{Data: data}, nil
+
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("minimax: parse response: %w", err)
+	}
+
+	if result.BaseResp.StatusCode != 0 {
+		return nil, fmt.Errorf("minimax API error %d: %s", result.BaseResp.StatusCode, result.BaseResp.StatusMsg)
+	}
+
+	audioBytes, err := hex.DecodeString(result.Data.Audio)
+	if err != nil {
+		return nil, fmt.Errorf("minimax: decode hex audio: %w", err)
+	}
+
+	return &AudioOutput{Data: audioBytes}, nil
 }

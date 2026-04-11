@@ -30,6 +30,8 @@ type Config struct {
 	Voice    string
 	Model    string
 	Alert    bool
+	Fg       bool
+	Polish   bool
 }
 
 var globalConfig *ConfigFile
@@ -80,6 +82,8 @@ func Parse(args []string) Config {
 		voice    = fs.String("voice", "", "Voice ID")
 		model    = fs.String("model", "", "Model ID (provider-specific)")
 		alert    = fs.Bool("alert", false, "Prepend alert tone and use alert voice")
+		fg       = fs.Bool("fg", false, "Play in foreground (blocking)")
+		polish   = fs.Bool("polish", false, "Add speech polish (leading pause, trailing punctuation)")
 	)
 
 	fs.Parse(args)
@@ -112,5 +116,7 @@ func Parse(args []string) Config {
 		Voice:    *voice,
 		Model:    *model,
 		Alert:    *alert,
+		Fg:       *fg,
+		Polish:   *polish,
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"unicode"
 
 	"attn-tool/internal/audio"
 	"attn-tool/internal/cli"
@@ -18,6 +19,14 @@ func Run(args []string) {
 		os.Exit(1)
 	}
 
+	text := cfg.Text
+	polished := ""
+	if cfg.Polish {
+		polished = polishText(text)
+		text = polished
+		fmt.Printf("[polished] %s → %s\n", cfg.Text, text)
+	}
+
 	providerType := tts.ProviderType(cfg.Provider)
 	provider := tts.NewProvider(providerType, cfg.Voice, cfg.Model)
 
@@ -27,7 +36,7 @@ func Run(args []string) {
 	}
 
 	ctx := context.Background()
-	audioOut, err := provider.Synthesize(ctx, cfg.Text, voice, cfg.Model)
+	audioOut, err := provider.Synthesize(ctx, text, voice, cfg.Model)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -41,11 +50,11 @@ func Run(args []string) {
 			alertFile.Write(audio.AlertTone())
 			alertFile.Close()
 			defer os.Remove(alertFile.Name())
-			audio.PlayMpv(alertFile.Name())
+			audio.PlayMpvBg(alertFile.Name())
 		}
 	}
 
-	if err := audio.PlayAndSave(finalAudio, cfg.Output, true); err != nil {
+	if err := audio.PlayAndSave(finalAudio, cfg.Output, true, cfg.Fg); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -73,4 +82,12 @@ func defaultVoice(pt tts.ProviderType, alert bool) string {
 func isFileOutput(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && fi.Mode().IsRegular()
+}
+
+func polishText(text string) string {
+	runes := []rune(text)
+	if len(runes) > 0 && unicode.IsLetter(runes[len(runes)-1]) {
+		return "... " + string(runes) + "."
+	}
+	return "... " + text
 }
