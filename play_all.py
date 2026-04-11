@@ -16,14 +16,25 @@ Usage:
 
 import subprocess
 import sys
+import json
+import os
+import select
+import shutil
+import socket
+import tempfile
+import termios
+import time
+import tty
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Optional
 
 import argparse
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
+from rich.live import Live
 from rich.progress import (
     Progress,
     SpinnerColumn,
@@ -44,6 +55,202 @@ class VoiceTask:
     voice: str
     text: str
     filename: str
+
+
+class PlaybackAction(Enum):
+    TOGGLE_PAUSE = "toggle_pause"
+    FASTER = "faster"
+    SLOWER = "slower"
+    RESET_SPEED = "reset_speed"
+    QUIT = "quit"
+
+
+MIN_PLAYBACK_SPEED = 0.5
+MAX_PLAYBACK_SPEED = 2.0
+PLAYBACK_SPEED_STEP = 0.25
+REVIEW_CONTROLS = "[space] pause/resume  [-] slower  [+] faster  [0] 1.0x  [q] quit"
+
+
+@dataclass(frozen=True)
+class PlaybackState:
+    paused: bool = False
+    speed: float = 1.0
+    quit_requested: bool = False
+
+    @property
+    def status_label(self) -> str:
+        if self.quit_requested:
+            return "Quitting"
+        if self.paused:
+            return "Paused"
+        return "Playing"
+
+    def for_new_file(self) -> "PlaybackState":
+        return replace(self, paused=False)
+
+
+@dataclass(frozen=True)
+class ReviewAvailability:
+    available: bool
+    reason: Optional[str]
+
+
+def clamp_playback_speed(speed: float) -> float:
+    return round(max(MIN_PLAYBACK_SPEED, min(MAX_PLAYBACK_SPEED, speed)), 2)
+
+
+def get_playback_action_for_key(key: str) -> Optional[PlaybackAction]:
+    keymap = {
+        " ": PlaybackAction.TOGGLE_PAUSE,
+        "+": PlaybackAction.FASTER,
+        "=": PlaybackAction.FASTER,
+        "-": PlaybackAction.SLOWER,
+        "_": PlaybackAction.SLOWER,
+        "0": PlaybackAction.RESET_SPEED,
+        "q": PlaybackAction.QUIT,
+        "Q": PlaybackAction.QUIT,
+        "\x03": PlaybackAction.QUIT,
+    }
+    return keymap.get(key)
+
+
+def apply_playback_action(
+    state: PlaybackState, action: PlaybackAction
+) -> PlaybackState:
+    if action == PlaybackAction.TOGGLE_PAUSE:
+        return replace(state, paused=not state.paused)
+    if action == PlaybackAction.FASTER:
+        return replace(
+            state, speed=clamp_playback_speed(state.speed + PLAYBACK_SPEED_STEP)
+        )
+    if action == PlaybackAction.SLOWER:
+        return replace(
+            state, speed=clamp_playback_speed(state.speed - PLAYBACK_SPEED_STEP)
+        )
+    if action == PlaybackAction.RESET_SPEED:
+        return replace(state, speed=1.0)
+    if action == PlaybackAction.QUIT:
+        return replace(state, quit_requested=True)
+    return state
+
+
+def mpv_command_for_state(
+    state: PlaybackState,
+    action: PlaybackAction,
+) -> Optional[dict[str, list[object]]]:
+    next_state = apply_playback_action(state, action)
+    if action == PlaybackAction.TOGGLE_PAUSE:
+        return {"command": ["set_property", "pause", next_state.paused]}
+    if action in {
+        PlaybackAction.FASTER,
+        PlaybackAction.SLOWER,
+        PlaybackAction.RESET_SPEED,
+    }:
+        return {"command": ["set_property", "speed", next_state.speed]}
+    return None
+
+
+def get_review_availability(
+    *,
+    has_input_tty: bool,
+    has_output_tty: bool,
+    has_playable_files: bool,
+    mpv_available: bool,
+) -> ReviewAvailability:
+    if not has_input_tty:
+        return ReviewAvailability(False, "stdin is not a TTY")
+    if not has_output_tty:
+        return ReviewAvailability(False, "stdout is not a TTY")
+    if not has_playable_files:
+        return ReviewAvailability(False, "no playable files were generated")
+    if not mpv_available:
+        return ReviewAvailability(False, "mpv is not installed")
+    return ReviewAvailability(True, None)
+
+
+class MpvPlayer:
+    def __init__(self, socket_path: Path):
+        self.socket_path = socket_path
+        self.process: Optional[subprocess.Popen[str]] = None
+
+    @staticmethod
+    def is_available() -> bool:
+        return shutil.which("mpv") is not None
+
+    def start(self, audio_path: Path, state: PlaybackState) -> None:
+        self.process = subprocess.Popen(
+            [
+                "mpv",
+                "--no-terminal",
+                "--really-quiet",
+                "--force-window=no",
+                f"--input-ipc-server={self.socket_path}",
+                f"--speed={state.speed}",
+                str(audio_path),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        self._wait_for_socket()
+
+    def _wait_for_socket(self) -> None:
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            if self.process is not None and self.process.poll() is not None:
+                raise RuntimeError(
+                    "mpv exited before playback controls became available"
+                )
+            if self.socket_path.exists():
+                return
+            time.sleep(0.05)
+        raise RuntimeError("timed out waiting for mpv IPC socket")
+
+    def is_running(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def send(self, payload: dict[str, list[object]]) -> None:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.settimeout(0.5)
+            sock.connect(os.fspath(self.socket_path))
+            sock.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+        finally:
+            sock.close()
+
+    def stop(self) -> None:
+        if self.process is None:
+            return
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=1)
+        self.process = None
+        try:
+            self.socket_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+class TerminalInput:
+    def __enter__(self) -> "TerminalInput":
+        self.fd = sys.stdin.fileno()
+        self.original_settings = termios.tcgetattr(self.fd)
+        tty.setcbreak(self.fd)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        termios.tcsetattr(self.fd, termios.TCSADRAIN, self.original_settings)
+
+    def read_key(self, timeout: float = 0.1) -> Optional[str]:
+        ready, _, _ = select.select([sys.stdin], [], [], timeout)
+        if not ready:
+            return None
+        return sys.stdin.read(1)
 
 
 # Voice definitions from the original script
@@ -193,6 +400,14 @@ class VoiceGenerator:
         self.results: list[tuple[VoiceTask, bool, Optional[str]]] = []
         self.dry_run = dry_run
 
+    def get_generated_audio_files(self) -> list[Path]:
+        files: list[Path] = []
+        for task, success, _ in self.results:
+            output_path = self.output_dir / task.filename
+            if success and output_path.is_file():
+                files.append(output_path)
+        return files
+
     def setup(self) -> None:
         """Create output directory if it doesn't exist."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -201,18 +416,21 @@ class VoiceGenerator:
         """Run a single voice generation task."""
         if self.dry_run:
             import time
+
             time.sleep(0.05)  # Simulate work
             return True, None
-            
+
         output_path = self.output_dir / task.filename
-        
+
         cmd = [
             "attn",
-            "--provider", task.provider,
-            "-o", str(output_path),
+            "--provider",
+            task.provider,
+            "-o",
+            str(output_path),
             task.text,
         ]
-        
+
         try:
             result = subprocess.run(
                 cmd,
@@ -237,10 +455,10 @@ class VoiceGenerator:
     ) -> None:
         """Run all tasks for a provider with progress tracking."""
         provider_title = f"[bold {color}]{provider_name} voices[/bold {color}]"
-        
+
         self.console.print()
         self.console.print(Panel(provider_title, box=box.ROUNDED, expand=False))
-        
+
         progress = Progress(
             SpinnerColumn(style=color),
             TextColumn("[bold blue]{task.fields[voice]:<18}[/bold blue]"),
@@ -251,14 +469,14 @@ class VoiceGenerator:
             console=self.console,
             expand=False,
         )
-        
+
         with progress:
             overall_task = progress.add_task(
                 f"[{color}]Processing...",
                 total=len(tasks),
                 voice="starting...",
             )
-            
+
             for task in tasks:
                 progress.update(overall_task, voice=task.voice)
                 success, error = self.run_task(task)
@@ -268,17 +486,19 @@ class VoiceGenerator:
     def display_summary(self) -> None:
         """Display a summary table of all results."""
         self.console.print()
-        
+
         # Count successes
         successful = sum(1 for _, success, _ in self.results if success)
         failed = len(self.results) - successful
-        
+
         # Create summary panel
         summary_text = Text()
         summary_text.append(f"✓ {successful} succeeded", style="bold green")
         summary_text.append("  |  ")
-        summary_text.append(f"✗ {failed} failed", style="bold red" if failed > 0 else "dim")
-        
+        summary_text.append(
+            f"✗ {failed} failed", style="bold red" if failed > 0 else "dim"
+        )
+
         self.console.print(
             Panel(
                 summary_text,
@@ -287,7 +507,7 @@ class VoiceGenerator:
                 expand=False,
             )
         )
-        
+
         # Create detailed table if there were failures
         if failed > 0:
             self.console.print()
@@ -300,23 +520,126 @@ class VoiceGenerator:
             table.add_column("Provider", style="cyan")
             table.add_column("Voice", style="blue")
             table.add_column("Error", style="red")
-            
+
             for task, success, error in self.results:
                 if not success:
                     table.add_row(task.provider, task.voice, error or "Unknown")
-            
+
             self.console.print(table)
-        
+
         # Final message
         self.console.print()
         self.console.print(
             f"[bold green]All done![/bold green] Check [cyan]{self.output_dir}/[/cyan]"
         )
 
+    def display_review_skip(self, reason: str) -> None:
+        self.console.print()
+        self.console.print(
+            Panel(
+                f"[bold yellow]Skipping playback review[/bold yellow]\n[dim]{reason}[/dim]",
+                title="Review Mode",
+                box=box.ROUNDED,
+                expand=False,
+            )
+        )
+
+    def render_review_panel(
+        self,
+        current_file: Path,
+        index: int,
+        total: int,
+        state: PlaybackState,
+    ):
+        status_style = "yellow" if state.paused else "green"
+        body = Group(
+            Text(f"File {index}/{total}: {current_file.name}", style="bold cyan"),
+            Text(f"Status: {state.status_label}", style=f"bold {status_style}"),
+            Text(f"Speed: {state.speed:.2f}x", style="bold magenta"),
+            Text(REVIEW_CONTROLS, style="dim"),
+        )
+        return Panel(body, title="Playback Review", box=box.ROUNDED, expand=False)
+
+    def run_review_mode(self) -> None:
+        playable_files = self.get_generated_audio_files()
+        availability = get_review_availability(
+            has_input_tty=sys.stdin.isatty(),
+            has_output_tty=sys.stdout.isatty(),
+            has_playable_files=bool(playable_files),
+            mpv_available=MpvPlayer.is_available(),
+        )
+        if not availability.available:
+            self.display_review_skip(availability.reason or "review mode unavailable")
+            return
+
+        self.console.print()
+        self.console.print(
+            Panel(
+                "[bold]Playback review[/bold]\n"
+                "[dim]Generated files are ready for keyboard-controlled review.[/dim]",
+                box=box.ROUNDED,
+                expand=False,
+            )
+        )
+
+        state = PlaybackState()
+        with tempfile.TemporaryDirectory(prefix="play_all_mpv_") as temp_dir:
+            socket_path = Path(temp_dir) / "mpv.sock"
+            player = MpvPlayer(socket_path)
+            try:
+                with (
+                    TerminalInput() as terminal_input,
+                    Live(console=self.console, refresh_per_second=10) as live,
+                ):
+                    for index, audio_path in enumerate(playable_files, start=1):
+                        state = state.for_new_file()
+                        player.start(audio_path, state)
+                        live.update(
+                            self.render_review_panel(
+                                audio_path, index, len(playable_files), state
+                            )
+                        )
+
+                        while player.is_running():
+                            key = terminal_input.read_key(timeout=0.1)
+                            if key is None:
+                                live.update(
+                                    self.render_review_panel(
+                                        audio_path, index, len(playable_files), state
+                                    )
+                                )
+                                continue
+
+                            action = get_playback_action_for_key(key)
+                            if action is None:
+                                continue
+
+                            command = mpv_command_for_state(state, action)
+                            state = apply_playback_action(state, action)
+                            if command is not None:
+                                player.send(command)
+                            live.update(
+                                self.render_review_panel(
+                                    audio_path, index, len(playable_files), state
+                                )
+                            )
+
+                            if state.quit_requested:
+                                player.stop()
+                                return
+                        player.stop()
+            except KeyboardInterrupt:
+                player.stop()
+                self.console.print()
+                self.console.print("[yellow]Playback review interrupted.[/yellow]")
+            except (RuntimeError, OSError) as exc:
+                player.stop()
+                self.display_review_skip(str(exc))
+
     def run(self) -> int:
         """Run the full voice generation workflow."""
         self.setup()
-        
+
         # Header
         self.console.print()
         self.console.print(
@@ -327,16 +650,19 @@ class VoiceGenerator:
                 expand=False,
             )
         )
-        
+
         # Run Groq voices
         self.run_provider_tasks(GROQ_VOICES, "Groq", "bright_magenta")
-        
+
         # Run MiniMax voices
         self.run_provider_tasks(MINIMAX_VOICES, "MiniMax", "bright_cyan")
-        
+
         # Display summary
         self.display_summary()
-        
+
+        if not self.dry_run:
+            self.run_review_mode()
+
         # Return exit code based on success
         failed = sum(1 for _, success, _ in self.results if not success)
         return 1 if failed > 0 else 0
@@ -352,6 +678,11 @@ Examples:
   ./play_all.py              # Generate all voices
   uv run play_all.py         # Run with uv (auto-installs dependencies)
   ./play_all.py --dry-run    # Preview the TUI without generating
+
+Review mode:
+  After generation, interactive runs enter a playback/review phase when mpv is
+  available and generated audio files exist. Controls: space pause/resume,
+  - slower, + faster, 0 reset to 1.0x, q quit review.
         """,
     )
     parser.add_argument(
@@ -360,13 +691,14 @@ Examples:
         help="Run without actually calling the attn command (for testing)",
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         default="voices-demo",
         help="Output directory for generated voice files (default: voices-demo)",
     )
-    
+
     args = parser.parse_args()
-    
+
     generator = VoiceGenerator(output_dir=args.output, dry_run=args.dry_run)
     return generator.run()
 
