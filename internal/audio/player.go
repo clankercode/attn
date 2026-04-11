@@ -105,6 +105,11 @@ func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLo
 				}
 				return fmt.Errorf("lock: %w", lockErr)
 			}
+			defer func() {
+				if lock != nil {
+					lock.Release()
+				}
+			}()
 		}
 
 		dur, _ := Duration(data)
@@ -118,18 +123,15 @@ func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLo
 			fmt.Printf("%s audio\n", player)
 		}
 
-		_ = lock // suppress unused warning when fg=true
 		var playErr error
 		if fg {
 			playErr = PlayMpvFg(outputPath)
 		} else {
-			wait, bgErr := PlayMpvBg(outputPath)
-			if bgErr == nil {
-				wait()
-				if lock != nil {
-					lock.Release()
-				}
+			waitFn, bgErr := PlayMpvBg(outputPath)
+			if bgErr != nil {
+				return fmt.Errorf("mpv: %w", bgErr)
 			}
+			waitFn()
 		}
 		return playErr
 	}
