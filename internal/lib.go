@@ -3,9 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 
 	"attn-tool/internal/audio"
 	"attn-tool/internal/cli"
@@ -42,7 +40,7 @@ func Run(args []string) {
 		finalAudio, _ = audio.ConcatWAV(alertTone, finalAudio)
 	}
 
-	doPlay := cfg.Output == "" || !isFileOutput(cfg.Output)
+	doPlay := true
 	if err := audio.PlayAndSave(finalAudio, cfg.Output, doPlay); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -69,8 +67,6 @@ func defaultVoice(pt tts.ProviderType, alert bool) string {
 }
 
 func isFileOutput(path string) bool {
-	cmd := exec.Command("mpv", "--quiet", "--no-terminal", "--pause", path)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	return cmd.Run() == nil
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode().IsRegular()
 }
