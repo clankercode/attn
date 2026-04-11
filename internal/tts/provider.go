@@ -1,6 +1,12 @@
 package tts
 
-import "context"
+import (
+	"context"
+	"net/http"
+	"time"
+)
+
+var httpClient = &http.Client{Timeout: 90 * time.Second}
 
 type AudioOutput struct {
 	Data []byte

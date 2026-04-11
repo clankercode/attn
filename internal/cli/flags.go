@@ -72,7 +72,7 @@ func init() {
 	}
 }
 
-func Parse(args []string) Config {
+func Parse(args []string) (Config, error) {
 	fs := flag.NewFlagSet("attn-tool", flag.ContinueOnError)
 	fs.Usage = func() {
 		println("Usage: attn [options] \"message\"")
@@ -92,7 +92,9 @@ func Parse(args []string) Config {
 		wait       = fs.Bool("wait", false, "Wait for any currently playing audio to finish before playing")
 	)
 
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return Config{}, err
+	}
 
 	text := ""
 	if args := fs.Args(); len(args) > 0 {
@@ -127,5 +129,5 @@ func Parse(args []string) Config {
 		ListVoices: *listVoices,
 		DryRun:     *dryRun,
 		Wait:       *wait,
-	}
+	}, nil
 }

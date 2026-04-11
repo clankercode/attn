@@ -16,8 +16,10 @@ import (
 	"github.com/faiface/beep/wav"
 )
 
-var speakerInitialized sync.Once
-var initErr error
+var (
+	speakerMu         sync.Mutex
+	speakerSampleRate beep.SampleRate
+)
 
 func Duration(data []byte) (string, error) {
 	if len(data) < 44 {
@@ -94,27 +96,40 @@ func playFile(path string) error {
 		return fmt.Errorf("decode: %w", err)
 	}
 
-	speakerInitialized.Do(func() {
-		initErr = speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
-	})
-	if initErr != nil {
+	if err := initSpeaker(format); err != nil {
 		streamer.Close()
 		f.Close()
-		return fmt.Errorf("speaker init: %w", initErr)
+		return fmt.Errorf("speaker init: %w", err)
 	}
 
-	speaker.Play(streamer)
-
 	done := make(chan struct{})
-	speaker.Play(beep.Callback(func() {
-		close(done)
-	}))
+	speaker.Play(streamerWithDone(streamer, done))
 	<-done
 
 	streamer.Close()
 	f.Close()
 
 	return nil
+}
+
+func initSpeaker(format beep.Format) error {
+	speakerMu.Lock()
+	defer speakerMu.Unlock()
+
+	if speakerSampleRate == format.SampleRate {
+		return nil
+	}
+	if err := speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10)); err != nil {
+		return err
+	}
+	speakerSampleRate = format.SampleRate
+	return nil
+}
+
+func streamerWithDone(streamer beep.Streamer, done chan<- struct{}) beep.Streamer {
+	return beep.Seq(streamer, beep.Callback(func() {
+		close(done)
+	}))
 }
 
 func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLock bool) error {

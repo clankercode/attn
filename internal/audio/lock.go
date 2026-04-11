@@ -57,7 +57,7 @@ func WaitForLock(timeoutMs int) (*lockState, error) {
 
 func (s *lockState) Release() error {
 	if s.file != nil {
-		s.file.Close()
+		return s.file.Close()
 	}
-	return os.Remove(lockDir + "/lock")
+	return nil
 }

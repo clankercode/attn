@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 	"unicode"
 
 	"attn-tool/internal/audio"
@@ -12,7 +13,10 @@ import (
 )
 
 func Run(args []string) {
-	cfg := cli.Parse(args)
+	cfg, err := cli.Parse(args)
+	if err != nil {
+		os.Exit(2)
+	}
 
 	providerType := tts.ProviderType(cfg.Provider)
 
@@ -40,7 +44,14 @@ func Run(args []string) {
 		voice = defaultVoice(providerType, cfg.Alert)
 	}
 
-	ctx := context.Background()
+	if cfg.DryRun {
+		fmt.Printf("[dry-run] would have saved to %s\n", cfg.Output)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
 	audioOut, err := provider.Synthesize(ctx, text, voice, cfg.Model)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -59,17 +70,11 @@ func Run(args []string) {
 		}
 	}
 
-	playAudio := !cfg.DryRun
-
-	if playAudio {
-		if err := audio.PlayAndSave(finalAudio, cfg.Output, true, cfg.Fg, cfg.Wait); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Printf("Saved to %s\n", cfg.Output)
-	} else {
-		fmt.Printf("[dry-run] would have saved to %s\n", cfg.Output)
+	if err := audio.PlayAndSave(finalAudio, cfg.Output, true, cfg.Fg, cfg.Wait); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
+	fmt.Printf("Saved to %s\n", cfg.Output)
 }
 
 func defaultVoice(pt tts.ProviderType, alert bool) string {
