@@ -36,6 +36,7 @@ func AcquireLock() (*lockState, error) {
 		return nil, fmt.Errorf("acquire lock: %w", err)
 	}
 
+	fmt.Fprintf(os.Stderr, "[LOCK] Acquired by PID %d\n", os.Getpid())
 	return &lockState{file: lockFile}, nil
 }
 

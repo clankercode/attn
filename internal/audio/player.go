@@ -4,12 +4,20 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
+
+	"github.com/faiface/beep"
+	"github.com/faiface/beep/mp3"
+	"github.com/faiface/beep/speaker"
+	"github.com/faiface/beep/wav"
 )
+
+var speakerInitialized sync.Once
+var initErr error
 
 func Duration(data []byte) (string, error) {
 	if len(data) < 44 {
@@ -61,22 +69,52 @@ func Duration(data []byte) (string, error) {
 	return "", fmt.Errorf("could not determine audio duration")
 }
 
-func PlayMpvBg(path string) (waitForFinish func(), err error) {
-	cmd := exec.Command("mpv", "--quiet", "--no-terminal", "--idle=no", path)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	err = cmd.Start()
+func playFile(path string) error {
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return func() { cmd.Wait() }, nil
-}
 
-func PlayMpvFg(path string) error {
-	cmd := exec.Command("mpv", "--quiet", "--no-terminal", path)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	return cmd.Run()
+	var streamer beep.StreamSeekCloser
+	var format beep.Format
+
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".mp3":
+		streamer, format, err = mp3.Decode(f)
+	case ".wav":
+		streamer, format, err = wav.Decode(f)
+	default:
+		f.Close()
+		return fmt.Errorf("unsupported audio format: %s", ext)
+	}
+
+	if err != nil {
+		f.Close()
+		return fmt.Errorf("decode: %w", err)
+	}
+
+	speakerInitialized.Do(func() {
+		initErr = speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
+	})
+	if initErr != nil {
+		streamer.Close()
+		f.Close()
+		return fmt.Errorf("speaker init: %w", initErr)
+	}
+
+	speaker.Play(streamer)
+
+	done := make(chan struct{})
+	speaker.Play(beep.Callback(func() {
+		close(done)
+	}))
+	<-done
+
+	streamer.Close()
+	f.Close()
+
+	return nil
 }
 
 func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLock bool) error {
@@ -105,12 +143,12 @@ func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLo
 				}
 				return fmt.Errorf("lock: %w", lockErr)
 			}
-			defer func() {
-				if lock != nil {
-					lock.Release()
-				}
-			}()
 		}
+		defer func() {
+			if lock != nil {
+				lock.Release()
+			}
+		}()
 
 		dur, _ := Duration(data)
 		player := "Playing"
@@ -123,17 +161,7 @@ func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLo
 			fmt.Printf("%s audio\n", player)
 		}
 
-		var playErr error
-		if fg {
-			playErr = PlayMpvFg(outputPath)
-		} else {
-			waitFn, bgErr := PlayMpvBg(outputPath)
-			if bgErr != nil {
-				return fmt.Errorf("mpv: %w", bgErr)
-			}
-			waitFn()
-		}
-		return playErr
+		return playFile(outputPath)
 	}
 	return nil
 }
@@ -155,16 +183,10 @@ func FormatBytes(n int) string {
 	return fmt.Sprintf("%dB", n)
 }
 
+func Play(path string) error {
+	return playFile(path)
+}
+
 func SuggestPlayback(path string) string {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".mp3":
-		return "mpv --no-terminal " + path
-	case ".wav":
-		return "mpv --no-terminal " + path
-	case ".flac":
-		return "mpv --no-terminal " + path
-	default:
-		return "mpv --no-terminal " + path
-	}
+	return path
 }

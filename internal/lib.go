@@ -55,7 +55,7 @@ func Run(args []string) {
 			alertFile.Write(audio.AlertTone())
 			alertFile.Close()
 			defer os.Remove(alertFile.Name())
-			audio.PlayMpvBg(alertFile.Name())
+			audio.Play(alertFile.Name())
 		}
 	}
 
