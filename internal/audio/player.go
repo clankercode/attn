@@ -207,19 +207,17 @@ func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLo
 		var lock *lockState
 		var lockErr error
 
-		if !fg {
-			if waitForLock {
-				lock, lockErr = WaitForLock(60000)
-			} else {
-				lock, lockErr = AcquireLock()
+		if waitForLock {
+			lock, lockErr = WaitForLock(60000)
+		} else {
+			lock, lockErr = AcquireLock()
+		}
+		if lockErr != nil {
+			if errors.Is(lockErr, ErrAlreadyPlaying) {
+				fmt.Printf("Audio already playing, skipping.\n")
+				return nil
 			}
-			if lockErr != nil {
-				if errors.Is(lockErr, ErrAlreadyPlaying) {
-					fmt.Printf("Audio already playing, skipping.\n")
-					return nil
-				}
-				return fmt.Errorf("lock: %w", lockErr)
-			}
+			return fmt.Errorf("lock: %w", lockErr)
 		}
 		defer func() {
 			if lock != nil {

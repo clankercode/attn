@@ -26,3 +26,21 @@ func TestReleaseKeepsLockFilePath(t *testing.T) {
 		t.Fatalf("expected lock file to remain after release: %v", err)
 	}
 }
+
+func TestForegroundPlaybackStillAcquiresLock(t *testing.T) {
+	originalLockDir := lockDir
+	lockDir = t.TempDir()
+	t.Cleanup(func() {
+		lockDir = originalLockDir
+	})
+
+	lock, err := AcquireLock()
+	if err != nil {
+		t.Fatalf("AcquireLock() error = %v", err)
+	}
+	defer lock.Release()
+
+	if _, err := WaitForLock(150); err == nil {
+		t.Fatal("expected wait to fail while foreground holder owns the lock")
+	}
+}
