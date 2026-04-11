@@ -17,10 +17,10 @@ type groqProvider struct {
 
 func newGroq(voice, model string) Provider {
 	if voice == "" {
-		voice = "Arista-PlayAI"
+		voice = "af_bella-Aurora"
 	}
 	if model == "" {
-		model = "playai-tts"
+		model = "canopylabs/orpheus-v1-english"
 	}
 	return &groqProvider{voice: voice, model: model}
 }
