@@ -426,6 +426,8 @@ class VoiceGenerator:
             "attn",
             "--provider",
             task.provider,
+            "--voice",
+            task.voice,
             "-o",
             str(output_path),
             task.text,

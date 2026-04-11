@@ -4,6 +4,8 @@ from play_all import (
     PlaybackAction,
     PlaybackState,
     ReviewAvailability,
+    VoiceGenerator,
+    VoiceTask,
     apply_playback_action,
     get_playback_action_for_key,
     get_review_availability,
@@ -12,6 +14,41 @@ from play_all import (
 
 
 class PlaybackControlTests(unittest.TestCase):
+    def test_run_task_passes_showcased_voice_to_attn(self) -> None:
+        task = VoiceTask(
+            provider="groq",
+            voice="autumn",
+            text="hello",
+            filename="autumn.wav",
+        )
+        generator = VoiceGenerator(output_dir="voices-demo")
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+
+            class Result:
+                returncode = 0
+                stderr = ""
+
+            return Result()
+
+        import play_all
+
+        original_run = play_all.subprocess.run
+        try:
+            play_all.subprocess.run = fake_run
+
+            success, error = generator.run_task(task)
+        finally:
+            play_all.subprocess.run = original_run
+
+        self.assertTrue(success)
+        self.assertIsNone(error)
+        cmd = calls[0][0]
+        self.assertIn("--voice", cmd)
+        self.assertEqual(cmd[cmd.index("--voice") + 1], "autumn")
+
     def test_key_mapping_matches_control_hints(self) -> None:
         self.assertEqual(get_playback_action_for_key(" "), PlaybackAction.TOGGLE_PAUSE)
         self.assertEqual(get_playback_action_for_key("-"), PlaybackAction.SLOWER)
