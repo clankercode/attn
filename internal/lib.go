@@ -45,8 +45,7 @@ func Run(args []string) {
 		}
 	}
 
-	doPlay := true
-	if err := audio.PlayAndSave(finalAudio, cfg.Output, doPlay); err != nil {
+	if err := audio.PlayAndSave(finalAudio, cfg.Output, true); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
@@ -58,14 +57,14 @@ func defaultVoice(pt tts.ProviderType, alert bool) string {
 	if alert {
 		switch pt {
 		case tts.ProviderGroq:
-			return "Arista-PlayAI"
+			return "austin"
 		default:
 			return "male-tianmei"
 		}
 	}
 	switch pt {
 	case tts.ProviderGroq:
-		return "Arista-PlayAI"
+		return "austin"
 	default:
 		return "female-shaonv"
 	}

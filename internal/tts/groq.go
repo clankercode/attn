@@ -18,7 +18,7 @@ type groqProvider struct {
 
 func newGroq(voice, model string) Provider {
 	if voice == "" {
-		voice = "af_bella-Aurora"
+		voice = "austin"
 	}
 	if model == "" {
 		model = "canopylabs/orpheus-v1-english"
@@ -43,9 +43,10 @@ func (g *groqProvider) Synthesize(ctx context.Context, text, voice, model string
 
 	url := "https://api.groq.com/openai/v1/audio/speech"
 	payload := map[string]any{
-		"model": model,
-		"voice": voice,
-		"input": text,
+		"model":           model,
+		"voice":           voice,
+		"input":           text,
+		"response_format": "wav",
 	}
 	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
@@ -57,14 +58,6 @@ func (g *groqProvider) Synthesize(ctx context.Context, text, voice, model string
 		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("groq API error: %s — %s", resp.Status, string(bodyBytes))
-	}
-	defer resp.Body.Close()
-
-	os.WriteFile("/tmp/attn-groq-debug.txt", []byte(fmt.Sprintf("status=%d contentType=%s\n", resp.StatusCode, resp.Header.Get("Content-Type"))), 0644)
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)

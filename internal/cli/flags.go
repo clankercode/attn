@@ -89,16 +89,20 @@ func Parse(args []string) Config {
 		text = args[0]
 	}
 
+	providerVal := *provider
+	if providerVal == "" {
+		providerVal = "minimax"
+	}
+
 	outPath := *output
 	if outPath == "" {
 		ts := time.Now().Unix()
 		home, _ := os.UserHomeDir()
-		outPath = home + "/.tts-output/" + fmt.Sprintf("%d", ts) + ".mp3"
-	}
-
-	providerVal := *provider
-	if providerVal == "" {
-		providerVal = "minimax"
+		ext := "mp3"
+		if providerVal == "groq" {
+			ext = "wav"
+		}
+		outPath = home + "/.tts-output/" + fmt.Sprintf("%d", ts) + "." + ext
 	}
 
 	return Config{
