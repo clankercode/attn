@@ -59,12 +59,17 @@ func Run(args []string) {
 		}
 	}
 
-	if err := audio.PlayAndSave(finalAudio, cfg.Output, true, cfg.Fg); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
+	playAudio := !cfg.DryRun
 
-	fmt.Printf("Saved to %s\n", cfg.Output)
+	if playAudio {
+		if err := audio.PlayAndSave(finalAudio, cfg.Output, true, cfg.Fg, cfg.Wait); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Saved to %s\n", cfg.Output)
+	} else {
+		fmt.Printf("[dry-run] would have saved to %s\n", cfg.Output)
+	}
 }
 
 func defaultVoice(pt tts.ProviderType, alert bool) string {

@@ -2,6 +2,7 @@ package audio
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -60,11 +61,15 @@ func Duration(data []byte) (string, error) {
 	return "", fmt.Errorf("could not determine audio duration")
 }
 
-func PlayMpvBg(path string) error {
+func PlayMpvBg(path string) (waitForFinish func(), err error) {
 	cmd := exec.Command("mpv", "--quiet", "--no-terminal", "--idle=no", path)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
-	return cmd.Start()
+	err = cmd.Start()
+	if err != nil {
+		return nil, err
+	}
+	return func() { cmd.Wait() }, nil
 }
 
 func PlayMpvFg(path string) error {
@@ -74,7 +79,7 @@ func PlayMpvFg(path string) error {
 	return cmd.Run()
 }
 
-func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool) error {
+func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLock bool) error {
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}
@@ -84,6 +89,24 @@ func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool) error {
 	}
 
 	if doPlay {
+		var lock *lockState
+		var lockErr error
+
+		if !fg {
+			if waitForLock {
+				lock, lockErr = WaitForLock(60000)
+			} else {
+				lock, lockErr = AcquireLock()
+			}
+			if lockErr != nil {
+				if errors.Is(lockErr, ErrAlreadyPlaying) {
+					fmt.Printf("Audio already playing, skipping.\n")
+					return nil
+				}
+				return fmt.Errorf("lock: %w", lockErr)
+			}
+		}
+
 		dur, _ := Duration(data)
 		player := "Playing"
 		if fg {
@@ -95,13 +118,20 @@ func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool) error {
 			fmt.Printf("%s audio\n", player)
 		}
 
-		var err error
+		_ = lock // suppress unused warning when fg=true
+		var playErr error
 		if fg {
-			err = PlayMpvFg(outputPath)
+			playErr = PlayMpvFg(outputPath)
 		} else {
-			err = PlayMpvBg(outputPath)
+			wait, bgErr := PlayMpvBg(outputPath)
+			if bgErr == nil {
+				wait()
+				if lock != nil {
+					lock.Release()
+				}
+			}
 		}
-		return err
+		return playErr
 	}
 	return nil
 }

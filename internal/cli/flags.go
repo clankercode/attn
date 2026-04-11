@@ -33,6 +33,8 @@ type Config struct {
 	Fg         bool
 	Polish     bool
 	ListVoices bool
+	DryRun     bool
+	Wait       bool
 }
 
 var globalConfig *ConfigFile
@@ -86,6 +88,8 @@ func Parse(args []string) Config {
 		fg         = fs.Bool("fg", false, "Play in foreground (blocking)")
 		polish     = fs.Bool("polish", false, "Add speech polish (leading pause, trailing punctuation)")
 		listVoices = fs.Bool("list-voices", false, "List available voices for the provider")
+		dryRun     = fs.Bool("dry-run", false, "Simulate TTS without playing audio (for testing)")
+		wait       = fs.Bool("wait", false, "Wait for any currently playing audio to finish before playing")
 	)
 
 	fs.Parse(args)
@@ -121,5 +125,7 @@ func Parse(args []string) Config {
 		Fg:         *fg,
 		Polish:     *polish,
 		ListVoices: *listVoices,
+		DryRun:     *dryRun,
+		Wait:       *wait,
 	}
 }
