@@ -1,2 +1,4 @@
 .worktrees/
 attn-tool
+**/__pycache__
+attn-tool
