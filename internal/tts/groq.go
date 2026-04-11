@@ -18,7 +18,7 @@ type groqProvider struct {
 
 func newGroq(voice, model string) Provider {
 	if voice == "" {
-		voice = "austin"
+		voice = "daniel"
 	}
 	if model == "" {
 		model = "canopylabs/orpheus-v1-english"

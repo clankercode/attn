@@ -71,14 +71,14 @@ func defaultVoice(pt tts.ProviderType, alert bool) string {
 	if alert {
 		switch pt {
 		case tts.ProviderGroq:
-			return "austin"
+			return "daniel"
 		default:
 			return "Deep_Voice_Man"
 		}
 	}
 	switch pt {
 	case tts.ProviderGroq:
-		return "austin"
+		return "daniel"
 	default:
 		return "Friendly_Person"
 	}
