@@ -25,17 +25,18 @@ type MinimaxConfig struct {
 }
 
 type Config struct {
-	Text       string
-	Output     string
-	Provider   string
-	Voice      string
-	Model      string
-	Alert      bool
-	Fg         bool
-	Polish     bool
-	ListVoices bool
-	DryRun     bool
-	Wait       bool
+	Text          string
+	Output        string
+	Provider      string
+	Voice         string
+	Model         string
+	Alert         bool
+	Fg            bool
+	Polish        bool
+	ListVoices    bool
+	DryRun        bool
+	Wait          bool
+	DebugPlayFile string
 }
 
 var globalConfig *ConfigFile
@@ -91,6 +92,7 @@ func Parse(args []string) (Config, error) {
 		listVoices = fs.Bool("list-voices", false, "List available voices for the provider")
 		dryRun     = fs.Bool("dry-run", false, "Simulate TTS without playing audio (for testing)")
 		wait       = fs.Bool("wait", false, "Wait for any currently playing audio to finish before playing")
+		debugPlay  = fs.String("debug-play-file", "", "Debug: play a file directly and exit (skip synthesis)")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -119,17 +121,18 @@ func Parse(args []string) (Config, error) {
 	}
 
 	return Config{
-		Text:       text,
-		Output:     outPath,
-		Provider:   providerVal,
-		Voice:      *voice,
-		Model:      *model,
-		Alert:      *alert,
-		Fg:         *fg,
-		Polish:     *polish,
-		ListVoices: *listVoices,
-		DryRun:     *dryRun,
-		Wait:       *wait,
+		Text:          text,
+		Output:        outPath,
+		Provider:      providerVal,
+		Voice:         *voice,
+		Model:         *model,
+		Alert:         *alert,
+		Fg:            *fg,
+		Polish:        *polish,
+		ListVoices:    *listVoices,
+		DryRun:        *dryRun,
+		Wait:          *wait,
+		DebugPlayFile: *debugPlay,
 	}, nil
 }
 

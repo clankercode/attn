@@ -13,9 +13,39 @@ import (
 )
 
 func Run(args []string) {
+	if handled, err := audio.HandleDetachedPlayback(args); handled || err != nil {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg, err := cli.Parse(args)
 	if err != nil {
 		os.Exit(2)
+	}
+
+	if cfg.DebugPlayFile != "" {
+		if cfg.Fg {
+			if err := audio.Play(cfg.DebugPlayFile); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+		data, err := os.ReadFile(cfg.DebugPlayFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: reading debug file: %v\n", err)
+			os.Exit(1)
+		}
+		tmpOutput := cfg.DebugPlayFile + ".attn-debug-tmp"
+		if err := audio.PlayAndSave(data, tmpOutput, true, false, false); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		os.Remove(tmpOutput)
+		return
 	}
 
 	providerType := tts.ProviderType(cfg.Provider)

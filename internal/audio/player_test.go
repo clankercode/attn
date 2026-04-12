@@ -2,6 +2,7 @@ package audio
 
 import (
 	"encoding/binary"
+	"path/filepath"
 	"testing"
 )
 
@@ -56,5 +57,89 @@ func TestSamplesToPCM16LE(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("sample %d: expected %d, got %d", i, want[i], got[i])
 		}
+	}
+}
+
+func TestPlayAndSaveBackgroundCallsDetachedSpawnerNotForeground(t *testing.T) {
+	originalSpawn := spawnDetachedPlayback
+	originalPlay := playFileFn
+	spawnCalled := false
+
+	spawnDetachedPlayback = func(path string, lock *lockState) error {
+		spawnCalled = true
+		if path == "" {
+			t.Fatal("expected non-empty path")
+		}
+		if lock == nil {
+			t.Fatal("expected non-nil lock")
+		}
+		return nil
+	}
+	playFileFn = func(path string) error {
+		t.Fatalf("foreground playFile should not be called for bg mode: %s", path)
+		return nil
+	}
+	t.Cleanup(func() {
+		spawnDetachedPlayback = originalSpawn
+		playFileFn = originalPlay
+	})
+
+	outputPath := filepath.Join(t.TempDir(), "sample.wav")
+	err := PlayAndSave(testWAVData(), outputPath, true, false, false)
+	if err != nil {
+		t.Fatalf("PlayAndSave() error = %v", err)
+	}
+	if !spawnCalled {
+		t.Fatal("expected detached spawner to be called for bg mode")
+	}
+}
+
+func TestForegroundPlayAndSaveCallsForegroundPlayer(t *testing.T) {
+	originalSpawn := spawnDetachedPlayback
+	originalPlay := playFileFn
+	foregroundCalled := false
+
+	spawnDetachedPlayback = func(path string, lock *lockState) error {
+		t.Fatalf("detached spawner should not be called for fg mode: %s", path)
+		return nil
+	}
+	playFileFn = func(path string) error {
+		foregroundCalled = true
+		if path == "" {
+			t.Fatal("expected non-empty path")
+		}
+		return nil
+	}
+	t.Cleanup(func() {
+		spawnDetachedPlayback = originalSpawn
+		playFileFn = originalPlay
+	})
+
+	outputPath := filepath.Join(t.TempDir(), "sample.wav")
+	err := PlayAndSave(testWAVData(), outputPath, true, true, false)
+	if err != nil {
+		t.Fatalf("PlayAndSave() error = %v", err)
+	}
+	if !foregroundCalled {
+		t.Fatal("expected foreground player to be called for fg mode")
+	}
+}
+
+func testWAVData() []byte {
+	return []byte{
+		'R', 'I', 'F', 'F',
+		40, 0, 0, 0,
+		'W', 'A', 'V', 'E',
+		'f', 'm', 't', ' ',
+		16, 0, 0, 0,
+		1, 0,
+		2, 0,
+		0x80, 0x3E, 0, 0,
+		0x00, 0xFA, 0x00, 0x00,
+		4, 0,
+		16, 0,
+		'd', 'a', 't', 'a',
+		4, 0, 0, 0,
+		0, 0, 0, 0,
 	}
 }

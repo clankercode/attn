@@ -11,10 +11,21 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/wav"
+)
+
+const (
+	detachedPlaybackEnv    = "ATTN_DETACHED_PLAYBACK"
+	detachedPlaybackLockFD = 3
+)
+
+var (
+	playFileFn            = playFile
+	spawnDetachedPlayback = startDetachedPlayback
 )
 
 func Duration(data []byte) (string, error) {
@@ -160,6 +171,47 @@ func streamToSink(streamer beep.Streamer, format beep.Format, sink string) error
 	return nil
 }
 
+func HandleDetachedPlayback(args []string) (bool, error) {
+	if os.Getenv(detachedPlaybackEnv) != "1" {
+		return false, nil
+	}
+	if len(args) != 1 {
+		return true, fmt.Errorf("detached playback expects exactly one path")
+	}
+
+	lockFile := os.NewFile(uintptr(detachedPlaybackLockFD), "attn-playback-lock")
+	if lockFile == nil {
+		return true, fmt.Errorf("missing inherited playback lock")
+	}
+	defer lockFile.Close()
+
+	if _, err := lockFile.Stat(); err != nil {
+		return true, fmt.Errorf("invalid inherited playback lock: %w", err)
+	}
+
+	return true, playFile(args[0])
+}
+
+func startDetachedPlayback(path string, lock *lockState) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+
+	cmd := exec.Command(exe, path)
+	cmd.Env = append(os.Environ(), detachedPlaybackEnv+"=1")
+	cmd.ExtraFiles = []*os.File{lock.file}
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start detached playback: %w", err)
+	}
+	return nil
+}
+
 func streamPCM(streamer beep.Streamer, w io.Writer) error {
 	buf := make([][2]float64, 2048)
 	for {
@@ -236,7 +288,10 @@ func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLo
 			fmt.Printf("%s audio\n", player)
 		}
 
-		return playFile(outputPath)
+		if fg {
+			return playFileFn(outputPath)
+		}
+		return spawnDetachedPlayback(outputPath, lock)
 	}
 	return nil
 }
