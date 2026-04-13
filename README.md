@@ -14,6 +14,15 @@ A lightweight CLI tool for text-to-speech audio generation and playback with sup
 
 ## Installation
 
+### With `go install`
+
+```bash
+go install github.com/clankercode/attn/cmd/attn@latest
+go install github.com/clankercode/attn/cmd/tts@latest
+```
+
+Make sure `$(go env GOBIN)` (or `~/go/bin`) is on your `PATH`.
+
 ### Build from Source
 
 ```bash

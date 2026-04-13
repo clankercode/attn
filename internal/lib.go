@@ -7,9 +7,9 @@ import (
 	"time"
 	"unicode"
 
-	"attn-tool/internal/audio"
-	"attn-tool/internal/cli"
-	"attn-tool/internal/tts"
+	"github.com/clankercode/attn/internal/audio"
+	"github.com/clankercode/attn/internal/cli"
+	"github.com/clankercode/attn/internal/tts"
 )
 
 func Run(args []string) {

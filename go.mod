@@ -1,4 +1,4 @@
-module attn-tool
+module github.com/clankercode/attn
 
 go 1.26.1
 

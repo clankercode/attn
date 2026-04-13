@@ -1,7 +1,7 @@
 package main
 
 import (
-	"attn-tool/internal"
+	"github.com/clankercode/attn/internal"
 	"os"
 )
 
