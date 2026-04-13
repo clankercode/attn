@@ -66,6 +66,10 @@ func Run(args []string) {
 		text = polished
 		fmt.Printf("[polished] %s → %s\n", cfg.Text, text)
 	}
+	if cfg.Style != "" && providerType == tts.ProviderMimo {
+		text = "<style>" + cfg.Style + "</style>" + text
+		fmt.Printf("[style] %s\n", cfg.Style)
+	}
 
 	provider := tts.NewProvider(providerType, cfg.Voice, cfg.Model)
 
@@ -112,6 +116,8 @@ func defaultVoice(pt tts.ProviderType, alert bool) string {
 		switch pt {
 		case tts.ProviderGroq:
 			return "daniel"
+		case tts.ProviderMimo:
+			return "mimo_default"
 		default:
 			return "Deep_Voice_Man"
 		}
@@ -129,6 +135,15 @@ func printVoices(pt tts.ProviderType) {
 	case tts.ProviderMinimax:
 		fmt.Println("MiniMax voices (speech-2.8-hd):")
 		for _, v := range tts.VoiceListMinimax {
+			fmt.Printf("  %s\n", v)
+		}
+	case tts.ProviderMimo:
+		fmt.Println("MiMo voices (mimo-v2-tts):")
+		for _, v := range tts.VoiceListMimo {
+			fmt.Printf("  %s\n", v)
+		}
+		fmt.Println("\nStyle presets (use with --style):")
+		for _, v := range tts.MimoStylePresets {
 			fmt.Printf("  %s\n", v)
 		}
 	default:

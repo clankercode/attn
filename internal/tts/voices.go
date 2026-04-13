@@ -16,6 +16,36 @@ var VoiceListGroq = []string{
 	"troy",
 }
 
+var VoiceListMimo = []string{
+	"mimo_default",
+	"default_zh",
+	"default_en",
+}
+
+var MimoStylePresets = []string{
+	"开心",
+	"生气",
+	"温柔",
+	"悄悄话",
+	"东北话",
+	"四川话",
+	"河南话",
+	"粤语",
+	"台湾腔",
+	"夹子音",
+	"焦急",
+	"悲伤",
+	"紧张",
+	"虚弱",
+	"激昂慷慨",
+	"慵懒",
+	"变快",
+	"变慢",
+	"唱歌",
+	"孙悟空",
+	"林黛玉",
+}
+
 var VoiceListMinimax = []string{
 	"Wise_Woman",
 	"Friendly_Person",
@@ -51,17 +81,24 @@ func ValidateVoice(provider ProviderType, voice string) bool {
 			}
 		}
 		return false
+	case ProviderMimo:
+		for _, v := range VoiceListMimo {
+			if v == voice {
+				return true
+			}
+		}
+		return false
 	}
 	return true
 }
 
 func RandomVoice(provider ProviderType) string {
-	voices := VoiceListMinimax
-	if provider == ProviderGroq {
-		voices = VoiceListGroq
+	switch provider {
+	case ProviderGroq:
+		return VoiceListGroq[randomSource.Intn(len(VoiceListGroq))]
+	case ProviderMimo:
+		return VoiceListMimo[randomSource.Intn(len(VoiceListMimo))]
+	default:
+		return VoiceListMinimax[randomSource.Intn(len(VoiceListMinimax))]
 	}
-	if len(voices) == 0 {
-		return ""
-	}
-	return voices[randomSource.Intn(len(voices))]
 }
