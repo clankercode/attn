@@ -113,7 +113,7 @@ func Parse(args []string) (Config, error) {
 		provider   = fs.String("provider", os.Getenv("TTS_PROVIDER"), "Provider: minimax, groq, or mimo")
 		voice      = fs.String("voice", "", "Voice ID")
 		model      = fs.String("model", "", "Model ID (provider-specific)")
-		style      = fs.String("style", "", "MiMo style preset (e.g. 开心, 东北话, 唱歌)")
+		style      = fs.String("style", "", "MiMo style preset (e.g. 开心, Happy, 东北话)")
 		alert      = fs.Bool("alert", false, "Prepend alert tone and use alert voice")
 		fg         = fs.Bool("fg", false, "Play in foreground (blocking)")
 		polish     = fs.Bool("polish", false, "Add speech polish (leading pause, trailing punctuation)")
@@ -175,11 +175,12 @@ Examples:
   attn --wait "test two."
   attn --provider groq --voice daniel "Heads up."
   attn --provider mimo --voice default_zh --style 开心 "你好世界"
+  attn --provider mimo --voice default_zh --style Happy "hello world"
 
 Common flags:
   --provider minimax|groq|mimo  Choose the TTS backend
   --voice NAME              Pick a specific voice
-  --style PRESET            MiMo style: 开心, 东北话, 唱歌, etc.
+  --style PRESET            MiMo style: 开心, Happy, 东北话, etc.
   --wait                    Queue behind current playback
   --fg                      Block until playback finishes
   --polish                  Add a leading pause and final punctuation

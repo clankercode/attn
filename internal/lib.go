@@ -67,8 +67,9 @@ func Run(args []string) {
 		fmt.Printf("[polished] %s → %s\n", cfg.Text, text)
 	}
 	if cfg.Style != "" && providerType == tts.ProviderMimo {
-		text = "<style>" + cfg.Style + "</style>" + text
-		fmt.Printf("[style] %s\n", cfg.Style)
+		resolved := tts.ResolveStyle(cfg.Style)
+		text = "<style>" + resolved + "</style>" + text
+		fmt.Printf("[style] %s\n", resolved)
 	}
 
 	provider := tts.NewProvider(providerType, cfg.Voice, cfg.Model)
@@ -143,8 +144,8 @@ func printVoices(pt tts.ProviderType) {
 			fmt.Printf("  %s\n", v)
 		}
 		fmt.Println("\nStyle presets (use with --style):")
-		for _, v := range tts.MimoStylePresets {
-			fmt.Printf("  %s\n", v)
+		for i, v := range tts.MimoStylePresets {
+			fmt.Printf("  %s (%s)\n", v, tts.MimoStylePresetsEnglish[i])
 		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown provider: %s\n", pt)

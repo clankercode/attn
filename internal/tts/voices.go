@@ -46,6 +46,30 @@ var MimoStylePresets = []string{
 	"林黛玉",
 }
 
+var MimoStylePresetsEnglish = []string{
+	"Happy",
+	"Angry",
+	"Gentle",
+	"Whisper",
+	"Northeastern accent",
+	"Sichuan accent",
+	"Henan accent",
+	"Cantonese",
+	"Taiwanese accent",
+	"Breathy/soft voice",
+	"Anxious",
+	"Sad",
+	"Nervous",
+	"Weak",
+	"Passionate",
+	"Lazy",
+	"Faster",
+	"Slower",
+	"Singing",
+	"Sun Wukong (Monkey King)",
+	"Lin Daiyu (from Dream of Red Chamber)",
+}
+
 var VoiceListMinimax = []string{
 	"Wise_Woman",
 	"Friendly_Person",
@@ -101,4 +125,32 @@ func RandomVoice(provider ProviderType) string {
 	default:
 		return VoiceListMinimax[randomSource.Intn(len(VoiceListMinimax))]
 	}
+}
+
+func ValidateStyle(style string) bool {
+	for _, v := range MimoStylePresets {
+		if v == style {
+			return true
+		}
+	}
+	for _, v := range MimoStylePresetsEnglish {
+		if v == style {
+			return true
+		}
+	}
+	return false
+}
+
+func ResolveStyle(style string) string {
+	for _, v := range MimoStylePresets {
+		if v == style {
+			return v
+		}
+	}
+	for idx, v := range MimoStylePresetsEnglish {
+		if v == style {
+			return MimoStylePresets[idx]
+		}
+	}
+	return style
 }
