@@ -183,7 +183,9 @@ Examples:
 Common flags:
   --provider minimax|groq|mimo  Choose the TTS backend
   --voice NAME              Pick a specific voice
+  --model NAME              Model ID (provider-specific)
   --style PRESET            MiMo style: 开心, Happy, 东北话, etc.
+  --alert                   Prepend alert tone and use alert voice
   --wait                    Queue behind current playback
   --fg                      Block until playback finishes
   --polish                  Add a leading pause and final punctuation
