@@ -194,6 +194,9 @@ Common flags:
   --list-voices             Show voices for the selected provider
   -o PATH                   Save output to a specific file
 
+Debug flags:
+  --debug-play-file PATH    Play a file directly and exit (skip synthesis)
+
 Defaults:
   provider: minimax
   voice: random for normal playback, fixed alert voice for --alert

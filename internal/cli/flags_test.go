@@ -46,6 +46,7 @@ func TestWriteHelpIncludesExamplesAndDefaults(t *testing.T) {
 		"--alert",
 		"--model",
 		"--silent",
+		"--debug-play-file",
 		"Defaults:",
 		"provider: minimax",
 		"voice: random for normal playback",
