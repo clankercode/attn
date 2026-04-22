@@ -95,7 +95,7 @@ func Run(args []string) {
 
 	finalAudio := audioOut.Data
 
-	if cfg.Alert {
+	if cfg.Alert && !cfg.Silent {
 		alertFile, err := os.CreateTemp("", "attn-alert-*.wav")
 		if err == nil {
 			alertFile.Write(audio.AlertTone())
@@ -103,6 +103,15 @@ func Run(args []string) {
 			defer os.Remove(alertFile.Name())
 			audio.Play(alertFile.Name())
 		}
+	}
+
+	if cfg.Silent {
+		if err := audio.Save(finalAudio, cfg.Output); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Saved to %s (silent)\n", cfg.Output)
+		return
 	}
 
 	if err := audio.PlayAndSave(finalAudio, cfg.Output, true, cfg.Fg, cfg.Wait); err != nil {

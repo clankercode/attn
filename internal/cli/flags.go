@@ -43,6 +43,7 @@ type Config struct {
 	Polish        bool
 	ListVoices    bool
 	DryRun        bool
+	Silent        bool
 	Wait          bool
 	DebugPlayFile string
 }
@@ -119,6 +120,7 @@ func Parse(args []string) (Config, error) {
 		polish     = fs.Bool("polish", false, "Add speech polish (leading pause, trailing punctuation)")
 		listVoices = fs.Bool("list-voices", false, "List available voices for the provider")
 		dryRun     = fs.Bool("dry-run", false, "Simulate TTS without playing audio (for testing)")
+		silent     = fs.Bool("silent", false, "Generate audio but skip playback (still saves to output file)")
 		wait       = fs.Bool("wait", false, "Wait for any currently playing audio to finish before playing")
 		debugPlay  = fs.String("debug-play-file", "", "Debug: play a file directly and exit (skip synthesis)")
 	)
@@ -162,6 +164,7 @@ func Parse(args []string) (Config, error) {
 		Polish:        *polish,
 		ListVoices:    *listVoices,
 		DryRun:        *dryRun,
+		Silent:        *silent,
 		Wait:          *wait,
 		DebugPlayFile: *debugPlay,
 	}, nil
@@ -185,6 +188,7 @@ Common flags:
   --fg                      Block until playback finishes
   --polish                  Add a leading pause and final punctuation
   --dry-run                 Skip synthesis/playback side effects
+  --silent                  Generate audio but skip playback (still saves to file)
   --list-voices             Show voices for the selected provider
   -o PATH                   Save output to a specific file
 
