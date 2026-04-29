@@ -66,6 +66,11 @@ func Run(args []string) {
 		text = polished
 		fmt.Printf("[polished] %s → %s\n", cfg.Text, text)
 	}
+	if cfg.Style != "" && providerType == tts.ProviderMimo {
+		resolved := tts.ResolveStyle(cfg.Style)
+		text = "<style>" + resolved + "</style>" + text
+		fmt.Printf("[style] %s\n", resolved)
+	}
 
 	provider := tts.NewProvider(providerType, cfg.Voice, cfg.Model)
 
@@ -90,7 +95,7 @@ func Run(args []string) {
 
 	finalAudio := audioOut.Data
 
-	if cfg.Alert {
+	if cfg.Alert && !cfg.Silent {
 		alertFile, err := os.CreateTemp("", "attn-alert-*.wav")
 		if err == nil {
 			alertFile.Write(audio.AlertTone())
@@ -98,6 +103,15 @@ func Run(args []string) {
 			defer os.Remove(alertFile.Name())
 			audio.Play(alertFile.Name())
 		}
+	}
+
+	if cfg.Silent {
+		if err := audio.Save(finalAudio, cfg.Output); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Saved to %s (silent)\n", cfg.Output)
+		return
 	}
 
 	if err := audio.PlayAndSave(finalAudio, cfg.Output, true, cfg.Fg, cfg.Wait); err != nil {
@@ -112,6 +126,8 @@ func defaultVoice(pt tts.ProviderType, alert bool) string {
 		switch pt {
 		case tts.ProviderGroq:
 			return "daniel"
+		case tts.ProviderMimo:
+			return "mimo_default"
 		default:
 			return "Deep_Voice_Man"
 		}
@@ -130,6 +146,15 @@ func printVoices(pt tts.ProviderType) {
 		fmt.Println("MiniMax voices (speech-2.8-hd):")
 		for _, v := range tts.VoiceListMinimax {
 			fmt.Printf("  %s\n", v)
+		}
+	case tts.ProviderMimo:
+		fmt.Println("MiMo voices (mimo-v2-tts):")
+		for _, v := range tts.VoiceListMimo {
+			fmt.Printf("  %s\n", v)
+		}
+		fmt.Println("\nStyle presets (use with --style):")
+		for i, v := range tts.MimoStylePresets {
+			fmt.Printf("  %s (%s)\n", v, tts.MimoStylePresetsEnglish[i])
 		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown provider: %s\n", pt)

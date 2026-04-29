@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -14,6 +15,7 @@ import (
 type ConfigFile struct {
 	Groq    GroqConfig    `yaml:"groq"`
 	Minimax MinimaxConfig `yaml:"minimax"`
+	Mimo    MimoConfig    `yaml:"mimo"`
 }
 
 type GroqConfig struct {
@@ -24,17 +26,24 @@ type MinimaxConfig struct {
 	APIKey string `yaml:"api_key"`
 }
 
+type MimoConfig struct {
+	APIKey  string `yaml:"api_key"`
+	BaseURL string `yaml:"base_url"`
+}
+
 type Config struct {
 	Text          string
 	Output        string
 	Provider      string
 	Voice         string
 	Model         string
+	Style         string
 	Alert         bool
 	Fg            bool
 	Polish        bool
 	ListVoices    bool
 	DryRun        bool
+	Silent        bool
 	Wait          bool
 	DebugPlayFile string
 }
@@ -71,6 +80,25 @@ func init() {
 		if os.Getenv("MINIMAX_API_KEY") == "" && cfg.Minimax.APIKey != "" {
 			os.Setenv("MINIMAX_API_KEY", cfg.Minimax.APIKey)
 		}
+		if os.Getenv("MIMO_API_KEY") == "" && cfg.Mimo.APIKey != "" {
+			os.Setenv("MIMO_API_KEY", cfg.Mimo.APIKey)
+		}
+		if os.Getenv("MIMO_BASE_URL") == "" && cfg.Mimo.BaseURL != "" {
+			os.Setenv("MIMO_BASE_URL", cfg.Mimo.BaseURL)
+		}
+	}
+
+	if os.Getenv("MIMO_API_KEY") == "" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			data, err := os.ReadFile(home + "/.mimo-key")
+			if err == nil {
+				key := strings.TrimSpace(string(data))
+				if key != "" {
+					os.Setenv("MIMO_API_KEY", key)
+				}
+			}
+		}
 	}
 }
 
@@ -83,14 +111,16 @@ func Parse(args []string) (Config, error) {
 
 	var (
 		output     = fs.String("o", "", "Output file path (default: ~/.tts-output/<timestamp>.mp3)")
-		provider   = fs.String("provider", os.Getenv("TTS_PROVIDER"), "Provider: minimax or groq")
+		provider   = fs.String("provider", os.Getenv("TTS_PROVIDER"), "Provider: minimax, groq, or mimo")
 		voice      = fs.String("voice", "", "Voice ID")
 		model      = fs.String("model", "", "Model ID (provider-specific)")
+		style      = fs.String("style", "", "MiMo style preset (e.g. 开心, Happy, 东北话)")
 		alert      = fs.Bool("alert", false, "Prepend alert tone and use alert voice")
 		fg         = fs.Bool("fg", false, "Play in foreground (blocking)")
 		polish     = fs.Bool("polish", false, "Add speech polish (leading pause, trailing punctuation)")
 		listVoices = fs.Bool("list-voices", false, "List available voices for the provider")
 		dryRun     = fs.Bool("dry-run", false, "Simulate TTS without playing audio (for testing)")
+		silent     = fs.Bool("silent", false, "Generate audio but skip playback (still saves to output file)")
 		wait       = fs.Bool("wait", false, "Wait for any currently playing audio to finish before playing")
 		debugPlay  = fs.String("debug-play-file", "", "Debug: play a file directly and exit (skip synthesis)")
 	)
@@ -116,6 +146,8 @@ func Parse(args []string) (Config, error) {
 		ext := "mp3"
 		if providerVal == "groq" {
 			ext = "wav"
+		} else if providerVal == "mimo" {
+			ext = "wav"
 		}
 		outPath = home + "/.tts-output/" + fmt.Sprintf("%d", ts) + "." + ext
 	}
@@ -126,11 +158,13 @@ func Parse(args []string) (Config, error) {
 		Provider:      providerVal,
 		Voice:         *voice,
 		Model:         *model,
+		Style:         *style,
 		Alert:         *alert,
 		Fg:            *fg,
 		Polish:        *polish,
 		ListVoices:    *listVoices,
 		DryRun:        *dryRun,
+		Silent:        *silent,
 		Wait:          *wait,
 		DebugPlayFile: *debugPlay,
 	}, nil
@@ -143,20 +177,29 @@ Examples:
   attn "Build finished."
   attn --wait "test two."
   attn --provider groq --voice daniel "Heads up."
+  attn --provider mimo --voice default_zh --style 开心 "你好世界"
+  attn --provider mimo --voice default_zh --style Happy "hello world"
 
 Common flags:
-  --provider minimax|groq   Choose the TTS backend
+  --provider minimax|groq|mimo  Choose the TTS backend
   --voice NAME              Pick a specific voice
+  --model NAME              Model ID (provider-specific)
+  --style PRESET            MiMo style: 开心, Happy, 东北话, etc.
+  --alert                   Prepend alert tone and use alert voice
   --wait                    Queue behind current playback
   --fg                      Block until playback finishes
   --polish                  Add a leading pause and final punctuation
   --dry-run                 Skip synthesis/playback side effects
+  --silent                  Generate audio but skip playback (still saves to file)
   --list-voices             Show voices for the selected provider
   -o PATH                   Save output to a specific file
+
+Debug flags:
+  --debug-play-file PATH    Play a file directly and exit (skip synthesis)
 
 Defaults:
   provider: minimax
   voice: random for normal playback, fixed alert voice for --alert
-  output: ~/.tts-output/<unique timestamp>.mp3 (or .wav for groq)
+  output: ~/.tts-output/<unique timestamp>.mp3 (or .wav for groq/mimo)
 `)
 }
