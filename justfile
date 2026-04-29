@@ -4,7 +4,7 @@ build:
     go build -o attn-tool ./cmd/attn
 
 # Install symlinks to ~/.local/bin
-install:
+install: build
     mkdir -p ~/.local/bin
     ln -sf {{ justfile_directory() }}/attn-tool ~/.local/bin/attn
     ln -sf {{ justfile_directory() }}/attn-tool ~/.local/bin/tts
