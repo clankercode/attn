@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 type minimaxProvider struct {
@@ -28,10 +30,28 @@ func newMinimax(voice, model string) Provider {
 
 func (m *minimaxProvider) Name() string { return "minimax" }
 
+func readKeyFile(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		path = filepath.Join(home, path[2:])
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
 func (m *minimaxProvider) Synthesize(ctx context.Context, text, voice, model string) (*AudioOutput, error) {
 	apiKey := os.Getenv("MINIMAX_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("MINIMAX_API_KEY not set")
+		apiKey = readKeyFile("~/.minimax")
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("MINIMAX_API_KEY not set and ~/.minimax not readable")
 	}
 
 	if voice == "" {

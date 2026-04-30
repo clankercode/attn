@@ -79,6 +79,22 @@ func Duration(data []byte) (string, error) {
 }
 
 func playFile(path string) error {
+	if sink, err := detectPCMSink(); err == nil {
+		if perr := playFilePCM(path, sink); perr == nil {
+			return nil
+		} else if fileSink, ferr := detectFileSink(); ferr == nil {
+			return playFileDirect(path, fileSink)
+		} else {
+			return perr
+		}
+	}
+	if fileSink, err := detectFileSink(); err == nil {
+		return playFileDirect(path, fileSink)
+	}
+	return fmt.Errorf("no supported playback program found (tried pw-play, pacat, paplay, ffplay, mpv)")
+}
+
+func playFilePCM(path, sink string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -91,12 +107,29 @@ func playFile(path string) error {
 	}
 	defer streamer.Close()
 
-	sink, err := detectPlaybackSink()
-	if err != nil {
-		return err
-	}
-
 	return streamToSink(streamer, format, sink)
+}
+
+func playFileDirect(path, sink string) error {
+	name, args := fileSinkCommand(sink, path)
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("run %s: %w", name, err)
+	}
+	return nil
+}
+
+func fileSinkCommand(sink, path string) (string, []string) {
+	switch sink {
+	case "ffplay":
+		return sink, []string{"-nodisp", "-autoexit", "-loglevel", "error", path}
+	case "mpv":
+		return sink, []string{"--no-video", "--really-quiet", path}
+	default:
+		return sink, []string{path}
+	}
 }
 
 func decodeAudio(r io.ReadCloser, path string) (beep.StreamSeekCloser, beep.Format, error) {
@@ -119,13 +152,22 @@ func decodeAudio(r io.ReadCloser, path string) (beep.StreamSeekCloser, beep.Form
 	}
 }
 
-func detectPlaybackSink() (string, error) {
+func detectPCMSink() (string, error) {
 	for _, name := range []string{"pw-play", "pacat", "paplay"} {
 		if _, err := exec.LookPath(name); err == nil {
 			return name, nil
 		}
 	}
-	return "", fmt.Errorf("no supported playback sink found (tried pw-play, pacat, paplay)")
+	return "", fmt.Errorf("no PCM playback sink found")
+}
+
+func detectFileSink() (string, error) {
+	for _, name := range []string{"ffplay", "mpv"} {
+		if _, err := exec.LookPath(name); err == nil {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("no file-mode playback program found")
 }
 
 func playbackCommand(sink string, sampleRate beep.SampleRate) (string, []string) {
