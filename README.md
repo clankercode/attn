@@ -7,6 +7,7 @@ A lightweight CLI tool for text-to-speech audio generation and playback with sup
 - **Multiple TTS Providers**: Support for Groq and Minimax APIs
 - **Local Playback**: Direct audio playback via PipeWire or system audio
 - **Background Playback**: Non-blocking audio output (by default)
+- **Silence Action**: Linux background playback shows a desktop notification with a Silence button
 - **Alert Mode**: Generate attention-grabbing audio notifications
 - **Dry Run**: Generate audio without requiring API keys (useful for testing)
 - **Cross-Platform**: Works on Linux, macOS, and Windows
@@ -70,6 +71,13 @@ By default, audio plays in the background. To wait for playback to complete:
 ```bash
 attn --foreground "Wait for this to finish"
 ```
+
+### Silence Background Playback
+
+On Linux desktops with a notification daemon, background playback shows an
+`attn is playing` notification. Click **Silence** to stop that audio without
+affecting other `attn` commands. If desktop notifications are unavailable,
+playback proceeds normally.
 
 ### Dry Run
 

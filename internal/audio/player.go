@@ -24,8 +24,12 @@ const (
 )
 
 var (
-	playFileFn            = playFile
-	spawnDetachedPlayback = startDetachedPlayback
+	playFileFn                = playFile
+	spawnDetachedPlayback     = startDetachedPlayback
+	startSilenceNotification  = startSilenceNotificationImpl
+	terminateDetachedPlayback = func() error {
+		return syscall.Kill(-os.Getpid(), syscall.SIGTERM)
+	}
 )
 
 func Duration(data []byte) (string, error) {
@@ -231,7 +235,16 @@ func HandleDetachedPlayback(args []string) (bool, error) {
 		return true, fmt.Errorf("invalid inherited playback lock: %w", err)
 	}
 
-	return true, playFile(args[0])
+	return true, playDetached(args[0])
+}
+
+func playDetached(path string) error {
+	stopNotification := startSilenceNotification(func() {
+		_ = terminateDetachedPlayback()
+	})
+	defer stopNotification()
+
+	return playFileFn(path)
 }
 
 func startDetachedPlayback(path string, lock *lockState) error {

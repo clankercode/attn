@@ -4,6 +4,7 @@ go 1.26.1
 
 require (
 	github.com/faiface/beep v1.1.0
+	github.com/godbus/dbus/v5 v5.2.0
 	golang.org/x/sys v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 )

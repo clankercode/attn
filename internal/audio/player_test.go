@@ -125,6 +125,48 @@ func TestForegroundPlayAndSaveCallsForegroundPlayer(t *testing.T) {
 	}
 }
 
+func TestDetachedPlaybackSilenceActionTerminatesPlaybackGroup(t *testing.T) {
+	originalPlay := playFileFn
+	originalNotifier := startSilenceNotification
+	originalTerminate := terminateDetachedPlayback
+
+	var action func()
+	notificationStopped := false
+	terminated := false
+	playFileFn = func(path string) error {
+		if action == nil {
+			t.Fatal("expected detached playback to start a silence notification")
+		}
+		action()
+		return nil
+	}
+	startSilenceNotification = func(onSilence func()) func() {
+		action = onSilence
+		return func() {
+			notificationStopped = true
+		}
+	}
+	terminateDetachedPlayback = func() error {
+		terminated = true
+		return nil
+	}
+	t.Cleanup(func() {
+		playFileFn = originalPlay
+		startSilenceNotification = originalNotifier
+		terminateDetachedPlayback = originalTerminate
+	})
+
+	if err := playDetached("sample.wav"); err != nil {
+		t.Fatalf("playDetached() error = %v", err)
+	}
+	if !terminated {
+		t.Fatal("expected Silence action to terminate the detached playback group")
+	}
+	if !notificationStopped {
+		t.Fatal("expected notification to close when detached playback ends")
+	}
+}
+
 func testWAVData() []byte {
 	return []byte{
 		'R', 'I', 'F', 'F',
