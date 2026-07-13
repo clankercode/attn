@@ -89,17 +89,76 @@ attn --dry-run "This won't call any API"
 
 ## Configuration
 
+### Config file
+
+Create `~/.config/attn/config.yaml` to set API keys, provider order, and voice policy:
+
+```yaml
+# When --provider / TTS_PROVIDER are unset, use the first known name.
+provider_priority:
+  - groq
+  - minimax
+  - mimo
+
+# Global bans are always merged with per-provider bans.
+# Prefer per-provider `preferred` lists — global preferred is only safe if
+# every name is valid for every provider that inherits the list.
+voices:
+  banned: [troy]
+
+groq:
+  api_key: "gsk_..."
+  preferred: [daniel, autumn, diana]   # random pool (not ranked priority)
+  banned: [troy]                       # excluded from auto-selection
+  alert_voice: daniel                  # used with --alert when --voice is unset
+
+minimax:
+  api_key: "..."
+  preferred: [Deep_Voice_Man, Wise_Woman, Calm_Woman]
+  alert_voice: Deep_Voice_Man
+
+mimo:
+  api_key: "..."
+  # base_url: "https://..."            # optional
+  preferred: [mimo_default]
+  alert_voice: mimo_default
+```
+
+**Selection rules**
+
+| Situation | Behavior |
+|-----------|----------|
+| `--voice NAME` | Always used (ignores preferred/banned) |
+| `--alert` without `--voice` | `alert_voice` for the provider, else built-in default |
+| Normal speech, no `--voice` | Uniform random from `preferred` pool minus banned; if preferred is empty, from full catalog minus banned |
+| Preferred all banned / unknown | Fall back to catalog minus banned |
+| Catalog entirely banned | Built-in alert default voice (never re-enables banned names in the pool) |
+| Provider resolution | `--provider` → `TTS_PROVIDER` → first known `provider_priority` → `minimax` |
+
+For Groq and MiMo (closed catalogs), preferred names that are not in the built-in list are dropped. MiniMax allows preferred IDs outside the curated subset (custom/system voices).
+
+Explicit CLI flags always win over the config file. Check resolution without calling an API:
+
+```bash
+attn --dry-run "hello"
+# [dry-run] provider=groq voice=autumn → /home/you/.tts-output/....wav
+```
+
 ### Environment Variables
 
 - `GROQ_API_KEY`: API key for Groq TTS provider
 - `MINIMAX_API_KEY`: API key for Minimax TTS provider
+- `MIMO_API_KEY`: API key for MiMo TTS provider
+- `TTS_PROVIDER`: default provider (`minimax`, `groq`, or `mimo`)
+
+Environment variables override keys from the config file when both are set.
 
 ### Providers
 
 #### Groq
 
 1. Accept terms at: https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english
-2. Set `GROQ_API_KEY` environment variable
+2. Set `GROQ_API_KEY` or put `api_key` under `groq:` in the config file
 
 ```bash
 attn --provider groq "Test message"
@@ -108,7 +167,7 @@ attn --provider groq "Test message"
 #### Minimax
 
 1. Obtain API key with TTS access from Minimax
-2. Set `MINIMAX_API_KEY` environment variable
+2. Set `MINIMAX_API_KEY` or put `api_key` under `minimax:` in the config file
 
 ```bash
 attn --provider minimax "Test message"

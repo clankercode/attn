@@ -72,15 +72,11 @@ func Run(args []string) {
 		fmt.Printf("[style] %s\n", resolved)
 	}
 
-	provider := tts.NewProvider(providerType, cfg.Voice, cfg.Model)
-
-	voice := cfg.Voice
-	if voice == "" {
-		voice = defaultVoice(providerType, cfg.Alert)
-	}
+	voice := tts.SelectVoice(providerType, cfg.VoicePrefs, cfg.Alert, cfg.Voice)
+	provider := tts.NewProvider(providerType, voice, cfg.Model)
 
 	if cfg.DryRun {
-		fmt.Printf("[dry-run] would have saved to %s\n", cfg.Output)
+		fmt.Printf("[dry-run] provider=%s voice=%s → %s\n", providerType, voice, cfg.Output)
 		return
 	}
 
@@ -119,20 +115,6 @@ func Run(args []string) {
 		os.Exit(1)
 	}
 	fmt.Printf("Saved to %s\n", cfg.Output)
-}
-
-func defaultVoice(pt tts.ProviderType, alert bool) string {
-	if alert {
-		switch pt {
-		case tts.ProviderGroq:
-			return "daniel"
-		case tts.ProviderMimo:
-			return "mimo_default"
-		default:
-			return "Deep_Voice_Man"
-		}
-	}
-	return tts.RandomVoice(pt)
 }
 
 func printVoices(pt tts.ProviderType) {
