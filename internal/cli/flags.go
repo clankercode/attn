@@ -329,12 +329,12 @@ Debug flags:
   --debug-play-file PATH    Play a file directly and exit (skip synthesis)
 
 Defaults:
-  provider: --provider > TTS_PROVIDER > provider_priority in config > minimax
+  provider: --provider > TTS_PROVIDER > provider_priority in config > grok, mimo, minimax
   voice: random from preferred pool (minus banned), or fixed alert_voice for --alert
   output: ~/.tts-output/<unique timestamp>.mp3 (or .wav for groq/mimo)
 
 Config file (~/.config/attn/config.yaml):
-  provider_priority: [grok, groq, minimax, mimo]
+  provider_priority: [grok, mimo, minimax]   # default when unset
   voices:
     banned: [troy]                    # merged into every provider's bans
     # preferred: [...]                # only if valid for every provider that inherits it

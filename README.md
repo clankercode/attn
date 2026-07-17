@@ -98,9 +98,8 @@ Create `~/.config/attn/config.yaml` to set API keys, provider order, and voice p
 # When --provider / TTS_PROVIDER are unset, use the first known name.
 provider_priority:
   - grok
-  - groq
+  - mimo      # Xiaomi MiMo
   - minimax
-  - mimo
 
 # Global bans are always merged with per-provider bans.
 # Prefer per-provider `preferred` lists — global preferred is only safe if
@@ -140,7 +139,7 @@ mimo:
 | Normal speech, no `--voice` | Uniform random from `preferred` pool minus banned; if preferred is empty, from full catalog minus banned |
 | Preferred all banned / unknown | Fall back to catalog minus banned |
 | Catalog entirely banned | Built-in alert default voice (never re-enables banned names in the pool) |
-| Provider resolution | `--provider` → `TTS_PROVIDER` → first known `provider_priority` → `minimax` |
+| Provider resolution | `--provider` → `TTS_PROVIDER` → first known `provider_priority` → built-in `grok`, `mimo`, `minimax` |
 
 For Groq and MiMo (closed catalogs), preferred names that are not in the built-in list are dropped. MiniMax allows preferred IDs outside the curated subset (custom/system voices).
 

@@ -38,10 +38,10 @@ func TestParseGeneratesUniqueDefaultOutputs(t *testing.T) {
 		t.Fatalf("expected unique output paths, got %q", first.Output)
 	}
 	if filepath.Ext(first.Output) != ".mp3" {
-		t.Fatalf("expected default minimax output to be .mp3, got %q", first.Output)
+		t.Fatalf("expected default grok output to be .mp3, got %q", first.Output)
 	}
-	if first.Provider != "minimax" {
-		t.Fatalf("expected default provider minimax, got %q", first.Provider)
+	if first.Provider != "grok" {
+		t.Fatalf("expected default provider grok, got %q", first.Provider)
 	}
 }
 

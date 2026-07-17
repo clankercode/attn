@@ -153,8 +153,21 @@ func TestResolveProvider(t *testing.T) {
 	if got := ResolveProvider("", []string{"grok"}); got != ProviderGrok {
 		t.Fatalf("expected grok from priority, got %s", got)
 	}
-	if got := ResolveProvider("", nil); got != ProviderMinimax {
-		t.Fatalf("expected minimax default, got %s", got)
+	if got := ResolveProvider("", nil); got != ProviderGrok {
+		t.Fatalf("expected built-in default grok, got %s", got)
+	}
+	if got := ResolveProvider("", []string{}); got != ProviderGrok {
+		t.Fatalf("expected built-in default grok for empty priority, got %s", got)
+	}
+	// Default chain: grok → mimo → minimax (first wins).
+	if got := ResolveProvider("", DefaultProviderPriority); got != ProviderGrok {
+		t.Fatalf("expected grok first in default priority, got %s", got)
+	}
+	if got := ResolveProvider("xiaomi", nil); got != ProviderMimo {
+		t.Fatalf("xiaomi alias should resolve to mimo, got %s", got)
+	}
+	if got := ResolveProvider("", []string{"xiaomi", "minimax"}); got != ProviderMimo {
+		t.Fatalf("priority xiaomi should resolve to mimo, got %s", got)
 	}
 }
 

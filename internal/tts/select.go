@@ -211,20 +211,53 @@ func filterOut(items []string, banned map[string]struct{}) []string {
 	return out
 }
 
+// DefaultProviderPriority is used when neither --provider / TTS_PROVIDER nor
+// config provider_priority is set. First known name wins.
+// Order: Grok (xAI) → MiMo (Xiaomi) → MiniMax.
+var DefaultProviderPriority = []string{
+	string(ProviderGrok),
+	string(ProviderMimo),
+	string(ProviderMinimax),
+}
+
 // ResolveProvider picks the default provider when the user did not specify one.
-// priority is an ordered list (first wins). Falls back to minimax.
+// priority is an ordered list (first wins). When empty, DefaultProviderPriority
+// is used (grok → mimo → minimax).
 // explicit comes from --provider or TTS_PROVIDER (already resolved by the flag package).
+// Aliases: "xiaomi" → mimo.
 func ResolveProvider(explicit string, priority []string) ProviderType {
 	explicit = strings.TrimSpace(explicit)
 	if explicit != "" {
-		return ProviderType(explicit)
+		return normalizeProviderName(explicit)
+	}
+	if len(priority) == 0 {
+		priority = DefaultProviderPriority
 	}
 	for _, p := range priority {
 		p = strings.TrimSpace(p)
-		switch ProviderType(p) {
+		if p == "" {
+			continue
+		}
+		pt := normalizeProviderName(p)
+		switch pt {
 		case ProviderGroq, ProviderGrok, ProviderMinimax, ProviderMimo:
-			return ProviderType(p)
+			return pt
 		}
 	}
-	return ProviderMinimax
+	return ProviderGrok
+}
+
+func normalizeProviderName(name string) ProviderType {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "xiaomi", "mimo":
+		return ProviderMimo
+	case "grok":
+		return ProviderGrok
+	case "groq":
+		return ProviderGroq
+	case "minimax":
+		return ProviderMinimax
+	default:
+		return ProviderType(name)
+	}
 }
