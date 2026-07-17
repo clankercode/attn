@@ -2,6 +2,7 @@ package tts
 
 import (
 	"math/rand"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,37 @@ var VoiceListGroq = []string{
 	"austin",
 	"daniel",
 	"troy",
+}
+
+// VoiceListGrok is the built-in xAI Grok TTS roster (GET /v1/tts/voices).
+// Custom voice IDs are still allowed via --voice (open catalog).
+var VoiceListGrok = []string{
+	"altair",
+	"ara",
+	"atlas",
+	"carina",
+	"castor",
+	"celeste",
+	"cosmo",
+	"eve",
+	"helios",
+	"helix",
+	"iris",
+	"kepler",
+	"leo",
+	"lumen",
+	"luna",
+	"lux",
+	"naksh",
+	"orion",
+	"perseus",
+	"rex",
+	"rigel",
+	"sal",
+	"sirius",
+	"ursa",
+	"zagan",
+	"zenith",
 }
 
 var VoiceListMimo = []string{
@@ -90,6 +122,15 @@ var VoiceListMinimax = []string{
 }
 
 func ValidateVoice(provider ProviderType, voice string) bool {
+	voice = strings.TrimSpace(voice)
+	if voice == "" {
+		return false
+	}
+	// Grok supports custom voice IDs (open catalog); any non-empty ID is accepted.
+	// Built-in roster IDs are case-insensitive per xAI docs.
+	if provider == ProviderGrok {
+		return true
+	}
 	switch provider {
 	case ProviderGroq:
 		for _, v := range VoiceListGroq {
@@ -120,6 +161,8 @@ func RandomVoice(provider ProviderType) string {
 	switch provider {
 	case ProviderGroq:
 		return VoiceListGroq[randomSource.Intn(len(VoiceListGroq))]
+	case ProviderGrok:
+		return VoiceListGrok[randomSource.Intn(len(VoiceListGrok))]
 	case ProviderMimo:
 		return VoiceListMimo[randomSource.Intn(len(VoiceListMimo))]
 	default:

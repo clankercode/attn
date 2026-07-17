@@ -24,6 +24,7 @@ type ConfigFile struct {
 	Voices GlobalVoices `yaml:"voices"`
 
 	Groq    ProviderConfig `yaml:"groq"`
+	Grok    ProviderConfig `yaml:"grok"`
 	Minimax ProviderConfig `yaml:"minimax"`
 	Mimo    MimoConfig     `yaml:"mimo"`
 }
@@ -131,6 +132,8 @@ func VoicePrefsFor(cfg *ConfigFile, provider tts.ProviderType) tts.VoicePrefs {
 	switch provider {
 	case tts.ProviderGroq:
 		pc = cfg.Groq
+	case tts.ProviderGrok:
+		pc = cfg.Grok
 	case tts.ProviderMimo:
 		pc = ProviderConfig{
 			APIKey:     cfg.Mimo.APIKey,
@@ -173,26 +176,36 @@ func mergeUnique(lists ...[]string) []string {
 	return out
 }
 
+func envEmpty(name string) bool {
+	return strings.TrimSpace(os.Getenv(name)) == ""
+}
+
 func applyAPIKeys(cfg *ConfigFile) {
 	if cfg == nil {
 		return
 	}
-	if os.Getenv("GROQ_API_KEY") == "" && cfg.Groq.APIKey != "" {
+	if envEmpty("GROQ_API_KEY") && cfg.Groq.APIKey != "" {
 		os.Setenv("GROQ_API_KEY", cfg.Groq.APIKey)
 	}
-	if os.Getenv("MINIMAX_API_KEY") == "" && cfg.Minimax.APIKey != "" {
+	// Prefer XAI_API_KEY (official); also accept GROK_API_KEY as alias.
+	// Config keys only — Grok CLI OIDC tokens are NOT injected into the
+	// environment (ResolveGrokAPIKey reads ~/.grok*/auth.json in-memory).
+	if envEmpty("XAI_API_KEY") && envEmpty("GROK_API_KEY") && cfg.Grok.APIKey != "" {
+		os.Setenv("XAI_API_KEY", cfg.Grok.APIKey)
+	}
+	if envEmpty("MINIMAX_API_KEY") && cfg.Minimax.APIKey != "" {
 		os.Setenv("MINIMAX_API_KEY", cfg.Minimax.APIKey)
 	}
-	if os.Getenv("MIMO_API_KEY") == "" && cfg.Mimo.APIKey != "" {
+	if envEmpty("MIMO_API_KEY") && cfg.Mimo.APIKey != "" {
 		os.Setenv("MIMO_API_KEY", cfg.Mimo.APIKey)
 	}
-	if os.Getenv("MIMO_BASE_URL") == "" && cfg.Mimo.BaseURL != "" {
+	if envEmpty("MIMO_BASE_URL") && cfg.Mimo.BaseURL != "" {
 		os.Setenv("MIMO_BASE_URL", cfg.Mimo.BaseURL)
 	}
 }
 
 func loadMimoKeyFile() {
-	if os.Getenv("MIMO_API_KEY") != "" {
+	if !envEmpty("MIMO_API_KEY") {
 		return
 	}
 	home, err := os.UserHomeDir()
@@ -223,7 +236,7 @@ func Parse(args []string) (Config, error) {
 
 	var (
 		output     = fs.String("o", "", "Output file path (default: ~/.tts-output/<timestamp>.mp3)")
-		provider   = fs.String("provider", os.Getenv("TTS_PROVIDER"), "Provider: minimax, groq, or mimo")
+		provider   = fs.String("provider", os.Getenv("TTS_PROVIDER"), "Provider: minimax, groq, grok, or mimo")
 		voice      = fs.String("voice", "", "Voice ID")
 		model      = fs.String("model", "", "Model ID (provider-specific)")
 		style      = fs.String("style", "", "MiMo style preset (e.g. 开心, Happy, 东北话)")
@@ -294,11 +307,12 @@ Examples:
   attn "Build finished."
   attn --wait "test two."
   attn --provider groq --voice daniel "Heads up."
+  attn --provider grok --voice eve "Grok speaking."
   attn --provider mimo --voice default_zh --style 开心 "你好世界"
   attn --provider mimo --voice default_zh --style Happy "hello world"
 
 Common flags:
-  --provider minimax|groq|mimo  Choose the TTS backend
+  --provider minimax|groq|grok|mimo  Choose the TTS backend
   --voice NAME              Pick a specific voice
   --model NAME              Model ID (provider-specific)
   --style PRESET            MiMo style: 开心, Happy, 东北话, etc.
@@ -320,7 +334,7 @@ Defaults:
   output: ~/.tts-output/<unique timestamp>.mp3 (or .wav for groq/mimo)
 
 Config file (~/.config/attn/config.yaml):
-  provider_priority: [groq, minimax, mimo]
+  provider_priority: [grok, groq, minimax, mimo]
   voices:
     banned: [troy]                    # merged into every provider's bans
     # preferred: [...]                # only if valid for every provider that inherits it
@@ -329,6 +343,10 @@ Config file (~/.config/attn/config.yaml):
     preferred: [daniel, autumn]       # random pool (order is not ranked priority)
     banned: [troy]
     alert_voice: daniel
+  grok:
+    # api_key optional — auto-loads from XAI_API_KEY or ~/.grok*/auth.json
+    preferred: [eve, ara, leo]
+    alert_voice: rex
   minimax:
     api_key: ...
     preferred: [Deep_Voice_Man, Wise_Woman]

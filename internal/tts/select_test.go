@@ -43,6 +43,11 @@ func TestSelectVoiceAlertUsesConfigThenDefault(t *testing.T) {
 	if got != "mimo_default" {
 		t.Fatalf("expected default mimo alert voice, got %q", got)
 	}
+
+	got = SelectVoice(ProviderGrok, VoicePrefs{}, true, "")
+	if got != "rex" {
+		t.Fatalf("expected default grok alert voice, got %q", got)
+	}
 }
 
 func TestSelectVoiceUsesPreferredPool(t *testing.T) {
@@ -144,6 +149,9 @@ func TestResolveProvider(t *testing.T) {
 	}
 	if got := ResolveProvider("", []string{"nope", "groq"}); got != ProviderGroq {
 		t.Fatalf("expected skip unknown, got %s", got)
+	}
+	if got := ResolveProvider("", []string{"grok"}); got != ProviderGrok {
+		t.Fatalf("expected grok from priority, got %s", got)
 	}
 	if got := ResolveProvider("", nil); got != ProviderMinimax {
 		t.Fatalf("expected minimax default, got %s", got)

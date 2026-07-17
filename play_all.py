@@ -293,6 +293,166 @@ GROQ_VOICES = [
     ),
 ]
 
+# Full xAI Grok TTS roster (GET /v1/tts/voices).
+GROK_VOICES = [
+    VoiceTask(
+        provider="grok",
+        voice="altair",
+        filename="grok_altair.mp3",
+        text="I'm Altair. Steady, clear, and built for the long haul. Here's a line I keep: 'Find your north, then walk it.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="ara",
+        filename="grok_ara.mp3",
+        text="Hi, I'm Ara — warm and conversational. My favorite thought: 'A good conversation is a door left open between two minds.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="atlas",
+        filename="grok_atlas.mp3",
+        text="Atlas here. I carry the weight so you don't have to. Remember: 'Strength is not the absence of burden — it is how you hold it.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="carina",
+        filename="grok_carina.mp3",
+        text="I'm Carina. Bright, precise, a little starlit. Poetry for me is simple: 'Look up. The map is already written.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="castor",
+        filename="grok_castor.mp3",
+        text="Castor. Twin-star energy — loyal, grounded, ready. 'We rise better when we rise together.' That's the whole idea.",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="celeste",
+        filename="grok_celeste.mp3",
+        text="Celeste speaking. Soft edges, clear sky. My line for the day: 'Quiet is not empty — it is full of listening.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="cosmo",
+        filename="grok_cosmo.mp3",
+        text="Cosmo here. Curious about everything farther than the horizon. 'Wonder is the oldest technology we have.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="eve",
+        filename="grok_eve.mp3",
+        text="I'm Eve — energetic and upbeat. Default for a reason. My motto: 'Start now. The first step is the only one that unlocks the rest.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="helios",
+        filename="grok_helios.mp3",
+        text="Helios. Full daylight energy. 'Shine hard enough and the shadows have nowhere left to hide.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="helix",
+        filename="grok_helix.mp3",
+        text="Helix. Patterns, spirals, progress that compounds. 'Turn once, learn once, rise forever.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="iris",
+        filename="grok_iris.mp3",
+        text="Iris here — color between storms. 'Every spectrum starts as a single clear note of light.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="kepler",
+        filename="grok_kepler.mp3",
+        text="Kepler. Measured, orbital, patient with big questions. 'Ellipses teach us: the long way around still arrives.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="leo",
+        filename="grok_leo.mp3",
+        text="Leo. Authoritative and strong. When I speak, I mean it: 'Courage is volume with purpose.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="lumen",
+        filename="grok_lumen.mp3",
+        text="Lumen. Soft light, not a spotlight. 'Illumination is gentler than glare — and usually more useful.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="luna",
+        filename="grok_luna.mp3",
+        text="Luna. Night-side calm. 'Even when the sun is gone, reflection is still a kind of power.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="lux",
+        filename="grok_lux.mp3",
+        text="Lux. Clean edges, high contrast. 'Clarity is a luxury until you try living without it.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="naksh",
+        filename="grok_naksh.mp3",
+        text="Naksh. Steady voice, wide sky. 'A constellation is just stubborn stars that kept showing up.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="orion",
+        filename="grok_orion.mp3",
+        text="Orion. Hunter's focus. 'Aim once, carefully — then commit without looking back.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="perseus",
+        filename="grok_perseus.mp3",
+        text="Perseus. Mythic grit, modern cadence. 'Monsters shrink when you walk toward them on purpose.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="rex",
+        filename="grok_rex.mp3",
+        text="Rex. Clear and professional — the alert voice. 'Say the important thing first. Everything else can wait.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="rigel",
+        filename="grok_rigel.mp3",
+        text="Rigel. Bright anchor in a dark field. 'Be the fixed point others navigate by.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="sal",
+        filename="grok_sal.mp3",
+        text="Sal. Smooth and balanced. 'The middle path is not compromise — it is precision.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="sirius",
+        filename="grok_sirius.mp3",
+        text="Sirius. Brightest in the night. 'Visibility is a responsibility when others are still finding their way.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="ursa",
+        filename="grok_ursa.mp3",
+        text="Ursa. Quiet strength, northern patience. 'Hold the line gently, and the line will hold you.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="zagan",
+        filename="grok_zagan.mp3",
+        text="Zagan. Edge of the known map. 'Adventure starts where certainty ends — pack lightly.'",
+    ),
+    VoiceTask(
+        provider="grok",
+        voice="zenith",
+        filename="grok_zenith.mp3",
+        text="Zenith. Peak light, peak moment. 'You only get the summit by refusing every good reason to stop halfway.'",
+    ),
+]
+
 MINIMAX_VOICES = [
     VoiceTask(
         provider="minimax",
@@ -647,7 +807,7 @@ class VoiceGenerator:
         self.console.print(
             Panel(
                 "[bold cyan]Voice Demo Generator[/bold cyan]\n"
-                "[dim]Generate voice samples using Groq and MiniMax providers[/dim]",
+                "[dim]Generate voice samples using Groq, Grok (xAI), and MiniMax[/dim]",
                 box=box.DOUBLE,
                 expand=False,
             )
@@ -655,6 +815,9 @@ class VoiceGenerator:
 
         # Run Groq voices
         self.run_provider_tasks(GROQ_VOICES, "Groq", "bright_magenta")
+
+        # Run Grok (xAI) voices — full built-in roster
+        self.run_provider_tasks(GROK_VOICES, "Grok (xAI)", "bright_yellow")
 
         # Run MiniMax voices
         self.run_provider_tasks(MINIMAX_VOICES, "MiniMax", "bright_cyan")
@@ -673,7 +836,7 @@ class VoiceGenerator:
 def main() -> int:
     """Entry point."""
     parser = argparse.ArgumentParser(
-        description="Generate voice demos using Groq and MiniMax providers",
+        description="Generate voice demos using Groq, Grok (xAI), and MiniMax providers",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

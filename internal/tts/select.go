@@ -24,6 +24,24 @@ func NormalizePrefs(p VoicePrefs) VoicePrefs {
 	}
 }
 
+func normalizeGrokPrefs(p VoicePrefs) VoicePrefs {
+	lower := func(items []string) []string {
+		if len(items) == 0 {
+			return nil
+		}
+		out := make([]string, len(items))
+		for i, item := range items {
+			out[i] = strings.ToLower(item)
+		}
+		return out
+	}
+	return VoicePrefs{
+		Preferred: lower(p.Preferred),
+		Banned:    lower(p.Banned),
+		Alert:     strings.ToLower(p.Alert),
+	}
+}
+
 func trimAll(items []string) []string {
 	if len(items) == 0 {
 		return nil
@@ -43,6 +61,8 @@ func Catalog(provider ProviderType) []string {
 	switch provider {
 	case ProviderGroq:
 		return append([]string(nil), VoiceListGroq...)
+	case ProviderGrok:
+		return append([]string(nil), VoiceListGrok...)
 	case ProviderMimo:
 		return append([]string(nil), VoiceListMimo...)
 	default:
@@ -52,7 +72,8 @@ func Catalog(provider ProviderType) []string {
 
 // closedCatalog is true when the built-in list is exhaustive for the provider.
 // MiniMax has 300+ system voices; our list is a curated subset, so preferred
-// names outside the subset are still allowed.
+// names outside the subset are still allowed. Grok supports custom voice IDs,
+// so preferred names outside the built-in roster are kept.
 func closedCatalog(provider ProviderType) bool {
 	switch provider {
 	case ProviderGroq, ProviderMimo:
@@ -67,6 +88,8 @@ func DefaultAlertVoice(provider ProviderType) string {
 	switch provider {
 	case ProviderGroq:
 		return "daniel"
+	case ProviderGrok:
+		return "rex"
 	case ProviderMimo:
 		return "mimo_default"
 	default:
@@ -83,8 +106,16 @@ func DefaultAlertVoice(provider ProviderType) string {
 // entry, then a fixed last-resort default so synthesis can still run.
 func SelectVoice(provider ProviderType, prefs VoicePrefs, alert bool, explicit string) string {
 	prefs = NormalizePrefs(prefs)
+	if provider == ProviderGrok {
+		// Case-insensitive IDs: normalize prefs so bans/preferred match the catalog.
+		prefs = normalizeGrokPrefs(prefs)
+	}
 	if explicit != "" {
-		return strings.TrimSpace(explicit)
+		v := strings.TrimSpace(explicit)
+		if provider == ProviderGrok {
+			return strings.ToLower(v)
+		}
+		return v
 	}
 	if alert {
 		if prefs.Alert != "" {
@@ -191,7 +222,7 @@ func ResolveProvider(explicit string, priority []string) ProviderType {
 	for _, p := range priority {
 		p = strings.TrimSpace(p)
 		switch ProviderType(p) {
-		case ProviderGroq, ProviderMinimax, ProviderMimo:
+		case ProviderGroq, ProviderGrok, ProviderMinimax, ProviderMimo:
 			return ProviderType(p)
 		}
 	}

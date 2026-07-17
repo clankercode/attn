@@ -124,6 +124,12 @@ func printVoices(pt tts.ProviderType) {
 		for _, v := range tts.VoiceListGroq {
 			fmt.Printf("  %s\n", v)
 		}
+	case tts.ProviderGrok:
+		fmt.Println("Grok (xAI) voices (all built-in):")
+		for _, v := range tts.VoiceListGrok {
+			fmt.Printf("  %s\n", v)
+		}
+		fmt.Printf("\n%d voices. Custom IDs from the xAI console also work with --voice.\n", len(tts.VoiceListGrok))
 	case tts.ProviderMinimax:
 		fmt.Println("MiniMax voices (speech-2.8-hd):")
 		for _, v := range tts.VoiceListMinimax {

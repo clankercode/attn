@@ -4,7 +4,7 @@ A lightweight CLI tool for text-to-speech audio generation and playback with sup
 
 ## Features
 
-- **Multiple TTS Providers**: Support for Groq and Minimax APIs
+- **Multiple TTS Providers**: Support for Groq, Grok (xAI), Minimax, and MiMo APIs
 - **Local Playback**: Direct audio playback via PipeWire or system audio
 - **Background Playback**: Non-blocking audio output (by default)
 - **Silence Action**: Linux background playback shows a desktop notification with a Silence button
@@ -61,6 +61,7 @@ attn -o output.mp3 "Save this message to a file"
 
 ```bash
 attn --provider groq "Using Groq API"
+attn --provider grok "Using Grok (xAI) TTS"
 attn --provider minimax "Using Minimax API"
 ```
 
@@ -96,6 +97,7 @@ Create `~/.config/attn/config.yaml` to set API keys, provider order, and voice p
 ```yaml
 # When --provider / TTS_PROVIDER are unset, use the first known name.
 provider_priority:
+  - grok
   - groq
   - minimax
   - mimo
@@ -111,6 +113,11 @@ groq:
   preferred: [daniel, autumn, diana]   # random pool (not ranked priority)
   banned: [troy]                       # excluded from auto-selection
   alert_voice: daniel                  # used with --alert when --voice is unset
+
+grok:
+  # api_key optional — auto-loads from XAI_API_KEY or ~/.grok*/auth.json
+  preferred: [eve, ara, leo]
+  alert_voice: rex
 
 minimax:
   api_key: "..."
@@ -141,15 +148,17 @@ Explicit CLI flags always win over the config file. Check resolution without cal
 
 ```bash
 attn --dry-run "hello"
-# [dry-run] provider=groq voice=autumn → /home/you/.tts-output/....wav
+# [dry-run] provider=grok voice=eve → /home/you/.tts-output/....mp3
 ```
 
 ### Environment Variables
 
 - `GROQ_API_KEY`: API key for Groq TTS provider
+- `XAI_API_KEY` / `GROK_API_KEY`: API key for Grok (xAI) TTS (also auto-detected)
 - `MINIMAX_API_KEY`: API key for Minimax TTS provider
 - `MIMO_API_KEY`: API key for MiMo TTS provider
-- `TTS_PROVIDER`: default provider (`minimax`, `groq`, or `mimo`)
+- `TTS_PROVIDER`: default provider (`minimax`, `groq`, `grok`, or `mimo`)
+- `GROK_TTS_LANGUAGE` / `XAI_TTS_LANGUAGE`: BCP-47 language for Grok TTS (default `en`)
 
 Environment variables override keys from the config file when both are set.
 
@@ -162,6 +171,23 @@ Environment variables override keys from the config file when both are set.
 
 ```bash
 attn --provider groq "Test message"
+```
+
+#### Grok (xAI)
+
+1. Create an API key at https://console.x.ai/team/default/api-keys, **or** sign in with the Grok CLI so `~/.grok/auth.json` exists
+2. Credential resolution order:
+   1. `XAI_API_KEY` env
+   2. `GROK_API_KEY` env
+   3. `api_key` under `grok:` in the config file
+   4. Auto-detect OIDC token from (first hit wins):
+      `~/.grok/auth.json`, `~/.grok1/auth.json`, `~/.grok2/auth.json`,
+      `~/.grok-1/auth.json`, `~/.grok-2/auth.json`
+
+```bash
+attn --provider grok "Test message"
+attn --provider grok --voice eve "Hello from Eve"
+attn --provider grok --list-voices
 ```
 
 #### Minimax
@@ -197,6 +223,7 @@ just test
 
 ```bash
 just test-groq
+just test-grok
 just test-minimax
 ```
 

@@ -146,6 +146,42 @@ func TestVoicePrefsForPrefersProviderOverGlobal(t *testing.T) {
 	}
 }
 
+func TestParseGrokProviderFromPriority(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `
+provider_priority:
+  - grok
+  - minimax
+grok:
+  preferred: [eve, ara]
+  alert_voice: rex
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ResetConfigForTest(path)
+	t.Cleanup(func() { ResetConfigForTest("") })
+	t.Setenv("TTS_PROVIDER", "")
+
+	cfg, err := Parse([]string{"hello"})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if cfg.Provider != "grok" {
+		t.Fatalf("expected grok from priority, got %q", cfg.Provider)
+	}
+	if cfg.VoicePrefs.Alert != "rex" {
+		t.Fatalf("expected alert rex, got %q", cfg.VoicePrefs.Alert)
+	}
+	if len(cfg.VoicePrefs.Preferred) != 2 {
+		t.Fatalf("preferred: %v", cfg.VoicePrefs.Preferred)
+	}
+	if filepath.Ext(cfg.Output) != ".mp3" {
+		t.Fatalf("expected .mp3 output for grok, got %q", cfg.Output)
+	}
+}
+
 func TestWriteHelpIncludesExamplesAndDefaults(t *testing.T) {
 	var buf bytes.Buffer
 	writeHelp(&buf)
@@ -157,6 +193,7 @@ func TestWriteHelpIncludesExamplesAndDefaults(t *testing.T) {
 		"attn \"Build finished.\"",
 		"attn --wait \"test two.\"",
 		"attn --provider groq --voice daniel \"Heads up.\"",
+		"attn --provider grok --voice eve",
 		"Common flags:",
 		"--alert",
 		"--model",
@@ -168,6 +205,7 @@ func TestWriteHelpIncludesExamplesAndDefaults(t *testing.T) {
 		"voice: random from preferred pool",
 		"banned",
 		"alert_voice",
+		"minimax|groq|grok|mimo",
 	}
 	for _, check := range checks {
 		if !strings.Contains(out, check) {

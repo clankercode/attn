@@ -22,6 +22,7 @@ type ProviderType string
 const (
 	ProviderMinimax ProviderType = "minimax"
 	ProviderGroq    ProviderType = "groq"
+	ProviderGrok    ProviderType = "grok"
 	ProviderMimo    ProviderType = "mimo"
 )
 
@@ -29,6 +30,8 @@ func NewProvider(t ProviderType, voice, model string) Provider {
 	switch t {
 	case ProviderGroq:
 		return newGroq(voice, model)
+	case ProviderGrok:
+		return newGrok(voice, model)
 	case ProviderMimo:
 		return newMimo(voice, model)
 	default:

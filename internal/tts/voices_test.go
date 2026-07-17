@@ -17,6 +17,11 @@ func TestRandomVoiceReturnsKnownVoice(t *testing.T) {
 	if !ValidateVoice(ProviderMimo, voice) {
 		t.Fatalf("expected a valid mimo voice, got %q", voice)
 	}
+
+	voice = RandomVoice(ProviderGrok)
+	if !ValidateVoice(ProviderGrok, voice) {
+		t.Fatalf("expected a valid grok voice, got %q", voice)
+	}
 }
 
 func TestRandomVoiceFallsBackToMinimaxSet(t *testing.T) {
