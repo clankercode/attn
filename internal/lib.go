@@ -9,6 +9,7 @@ import (
 
 	"github.com/clankercode/attn/internal/audio"
 	"github.com/clankercode/attn/internal/cli"
+	"github.com/clankercode/attn/internal/history"
 	"github.com/clankercode/attn/internal/tts"
 )
 
@@ -18,6 +19,11 @@ func Run(args []string) {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
+		return
+	}
+
+	if len(args) > 0 && args[0] == "history" {
+		history.RunCommand(args[1:])
 		return
 	}
 
@@ -106,15 +112,46 @@ func Run(args []string) {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
+		recordHistory(cfg, text, voice, finalAudio)
 		fmt.Printf("Saved to %s (silent)\n", cfg.Output)
 		return
 	}
 
 	if err := audio.PlayAndSave(finalAudio, cfg.Output, true, cfg.Fg, cfg.Wait); err != nil {
+		// PlayAndSave writes the output file before playing, so a playback
+		// failure can leave a valid artifact on disk. Record it so the file
+		// is still browsable via `attn history`.
+		if _, statErr := os.Stat(cfg.Output); statErr == nil {
+			recordHistory(cfg, text, voice, finalAudio)
+		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+	recordHistory(cfg, text, voice, finalAudio)
 	fmt.Printf("Saved to %s\n", cfg.Output)
+}
+
+// recordHistory appends the generation to the history log. Failures are
+// non-fatal: history must never break TTS.
+func recordHistory(cfg cli.Config, spokenText, voice string, data []byte) {
+	if os.Getenv("ATTN_NO_HISTORY") == "1" {
+		return
+	}
+	err := history.Record(history.Entry{
+		Time:       time.Now(),
+		Text:       cfg.Text,
+		SpokenText: spokenText,
+		Provider:   cfg.Provider,
+		Voice:      voice,
+		Model:      cfg.Model,
+		Style:      cfg.Style,
+		Alert:      cfg.Alert,
+		Path:       cfg.Output,
+		Bytes:      len(data),
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: history not recorded: %v\n", err)
+	}
 }
 
 func printVoices(pt tts.ProviderType) {

@@ -325,6 +325,10 @@ Common flags:
   --list-voices             Show voices for the selected provider
   -o PATH                   Save output to a specific file
 
+Subcommands:
+  history                   Browse past generations in an interactive TUI
+                            (view text, provider, voice; replay cached audio)
+
 Debug flags:
   --debug-play-file PATH    Play a file directly and exit (skip synthesis)
 
@@ -332,6 +336,7 @@ Defaults:
   provider: --provider > TTS_PROVIDER > provider_priority in config > grok, mimo, minimax
   voice: random from preferred pool (minus banned), or fixed alert_voice for --alert
   output: ~/.tts-output/<unique timestamp>.mp3 (or .wav for groq/mimo)
+  history: JSONL at $XDG_DATA_HOME/attn/history.jsonl (ATTN_NO_HISTORY=1 to disable)
 
 Config file (~/.config/attn/config.yaml):
   provider_priority: [grok, mimo, minimax]   # default when unset

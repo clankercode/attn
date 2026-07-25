@@ -88,6 +88,22 @@ Test without requiring API keys:
 attn --dry-run "This won't call any API"
 ```
 
+### History
+
+Every generation is recorded (text, provider, voice, output path) to
+`$XDG_DATA_HOME/attn/history.jsonl` (~/.local/share/attn/history.jsonl).
+Browse and replay past audio in an interactive TUI:
+
+```bash
+attn history
+```
+
+- Shows the original text, provider, voice, model, and file for each entry
+- **Enter/Space** plays (or stops) the cached audio, `/` filters, `d` deletes (with confirm)
+- Audio cached before history existed is listed as `legacy` entries
+- When stdout is not a terminal, a plain list is printed instead of the TUI
+- Set `ATTN_NO_HISTORY=1` to disable recording
+
 ## Configuration
 
 ### Config file
