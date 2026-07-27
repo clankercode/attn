@@ -13,57 +13,64 @@ import (
 	"github.com/clankercode/attn/internal/tts"
 )
 
+// providerFactory is swappable in tests so run() can be exercised with fake
+// TTS backends without making network calls.
+var providerFactory = tts.NewProvider
+
 func Run(args []string) {
+	os.Exit(run(args))
+}
+
+func run(args []string) int {
 	if handled, err := audio.HandleDetachedPlayback(args); handled || err != nil {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
+			return 1
 		}
-		return
+		return 0
 	}
 
 	if len(args) > 0 && args[0] == "history" {
 		history.RunCommand(args[1:])
-		return
+		return 0
 	}
 
 	cfg, err := cli.Parse(args)
 	if err != nil {
-		os.Exit(2)
+		return 2
 	}
 
 	if cfg.DebugPlayFile != "" {
 		if cfg.Fg {
 			if err := audio.Play(cfg.DebugPlayFile); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
-				os.Exit(1)
+				return 1
 			}
-			return
+			return 0
 		}
 		data, err := os.ReadFile(cfg.DebugPlayFile)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: reading debug file: %v\n", err)
-			os.Exit(1)
+			return 1
 		}
 		tmpOutput := cfg.DebugPlayFile + ".attn-debug-tmp"
 		if err := audio.PlayAndSave(data, tmpOutput, true, false, false); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
+			return 1
 		}
 		os.Remove(tmpOutput)
-		return
+		return 0
 	}
 
 	providerType := tts.ProviderType(cfg.Provider)
 
 	if cfg.ListVoices {
-		printVoices(providerType)
-		return
+		return printVoices(providerType)
 	}
 
 	if cfg.Text == "" {
 		fmt.Fprintln(os.Stderr, "error: no text provided")
-		os.Exit(1)
+		return 1
 	}
 
 	text := cfg.Text
@@ -79,11 +86,11 @@ func Run(args []string) {
 	}
 
 	voice := tts.SelectVoice(providerType, cfg.VoicePrefs, cfg.Alert, cfg.Voice)
-	provider := tts.NewProvider(providerType, voice, cfg.Model)
+	provider := providerFactory(providerType, voice, cfg.Model)
 
 	if cfg.DryRun {
 		fmt.Printf("[dry-run] provider=%s voice=%s → %s\n", providerType, voice, cfg.Output)
-		return
+		return 0
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -92,7 +99,11 @@ func Run(args []string) {
 	audioOut, err := provider.Synthesize(ctx, text, voice, cfg.Model)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		return 1
+	}
+	if audioOut == nil || len(audioOut.Data) == 0 {
+		fmt.Fprintln(os.Stderr, "error: provider returned no audio")
+		return 1
 	}
 
 	finalAudio := audioOut.Data
@@ -110,11 +121,11 @@ func Run(args []string) {
 	if cfg.Silent {
 		if err := audio.Save(finalAudio, cfg.Output); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
+			return 1
 		}
 		recordHistory(cfg, text, voice, finalAudio)
 		fmt.Printf("Saved to %s (silent)\n", cfg.Output)
-		return
+		return 0
 	}
 
 	if err := audio.PlayAndSave(finalAudio, cfg.Output, true, cfg.Fg, cfg.Wait); err != nil {
@@ -125,10 +136,11 @@ func Run(args []string) {
 			recordHistory(cfg, text, voice, finalAudio)
 		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	recordHistory(cfg, text, voice, finalAudio)
 	fmt.Printf("Saved to %s\n", cfg.Output)
+	return 0
 }
 
 // recordHistory appends the generation to the history log. Failures are
@@ -154,7 +166,7 @@ func recordHistory(cfg cli.Config, spokenText, voice string, data []byte) {
 	}
 }
 
-func printVoices(pt tts.ProviderType) {
+func printVoices(pt tts.ProviderType) int {
 	switch pt {
 	case tts.ProviderGroq:
 		fmt.Println("Groq voices (canopylabs/orpheus-v1-english):")
@@ -183,8 +195,9 @@ func printVoices(pt tts.ProviderType) {
 		}
 	default:
 		fmt.Fprintf(os.Stderr, "unknown provider: %s\n", pt)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 func polishText(text string) string {

@@ -2,11 +2,14 @@ package internal
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"os"
 	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/clankercode/attn/internal/tts"
 )
 
 func TestRunDryRunDoesNotRequireAPIKey(t *testing.T) {
@@ -73,6 +76,27 @@ func TestDebugPlayFileBackgroundReturnsBeforeAudioFinishes(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		cmd.Process.Kill()
 		t.Fatal("attn did not return within 5s")
+	}
+}
+
+type emptyAudioProvider struct{}
+
+func (p *emptyAudioProvider) Name() string { return "empty" }
+
+func (p *emptyAudioProvider) Synthesize(ctx context.Context, text, voice, model string) (*tts.AudioOutput, error) {
+	return &tts.AudioOutput{Data: []byte{}}, nil
+}
+
+func TestRunExitsNonZeroOnEmptyAudio(t *testing.T) {
+	origFactory := providerFactory
+	providerFactory = func(t tts.ProviderType, voice, model string) tts.Provider {
+		return &emptyAudioProvider{}
+	}
+	t.Cleanup(func() { providerFactory = origFactory })
+
+	code := run([]string{"hello"})
+	if code != 1 {
+		t.Fatalf("expected exit code 1 for empty audio, got %d", code)
 	}
 }
 
