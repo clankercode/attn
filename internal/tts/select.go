@@ -220,19 +220,20 @@ var DefaultProviderPriority = []string{
 	string(ProviderMinimax),
 }
 
-// ResolveProvider picks the default provider when the user did not specify one.
-// priority is an ordered list (first wins). When empty, DefaultProviderPriority
-// is used (grok → mimo → minimax).
-// explicit comes from --provider or TTS_PROVIDER (already resolved by the flag package).
-// Aliases: "xiaomi" → mimo.
-func ResolveProvider(explicit string, priority []string) ProviderType {
+// ProviderCandidates returns providers to try in order.
+// Explicit provider → single-element slice (no fallback).
+// Otherwise → deduplicated provider_priority (or DefaultProviderPriority).
+// Unknown names are skipped. Always returns at least one known provider.
+func ProviderCandidates(explicit string, priority []string) []ProviderType {
 	explicit = strings.TrimSpace(explicit)
 	if explicit != "" {
-		return normalizeProviderName(explicit)
+		return []ProviderType{normalizeProviderName(explicit)}
 	}
 	if len(priority) == 0 {
 		priority = DefaultProviderPriority
 	}
+	seen := make(map[ProviderType]struct{})
+	var out []ProviderType
 	for _, p := range priority {
 		p = strings.TrimSpace(p)
 		if p == "" {
@@ -241,10 +242,26 @@ func ResolveProvider(explicit string, priority []string) ProviderType {
 		pt := normalizeProviderName(p)
 		switch pt {
 		case ProviderGroq, ProviderGrok, ProviderMinimax, ProviderMimo:
-			return pt
+			if _, ok := seen[pt]; ok {
+				continue
+			}
+			seen[pt] = struct{}{}
+			out = append(out, pt)
 		}
 	}
-	return ProviderGrok
+	if len(out) == 0 {
+		return []ProviderType{ProviderGrok}
+	}
+	return out
+}
+
+// ResolveProvider picks the default provider when the user did not specify one.
+// priority is an ordered list (first wins). When empty, DefaultProviderPriority
+// is used (grok → mimo → minimax).
+// explicit comes from --provider or TTS_PROVIDER (already resolved by the flag package).
+// Aliases: "xiaomi" → mimo.
+func ResolveProvider(explicit string, priority []string) ProviderType {
+	return ProviderCandidates(explicit, priority)[0]
 }
 
 func normalizeProviderName(name string) ProviderType {

@@ -90,16 +90,17 @@ attn --dry-run "This won't call any API"
 
 ### History
 
-Every generation is recorded (text, provider, voice, output path) to
+Every generation is recorded (text, provider, voice, cwd, output path) to
 `$XDG_DATA_HOME/attn/history.jsonl` (~/.local/share/attn/history.jsonl).
+Older entries without `cwd` still load; the TUI shows `(not recorded)` for missing optional fields.
 Browse and replay past audio in an interactive TUI:
 
 ```bash
 attn history
 ```
 
-- Shows the original text, provider, voice, model, and file for each entry
-- **Enter/Space** plays (or stops) the cached audio, `/` filters, `d` deletes (with confirm)
+- Shows the original text, provider, voice, model, cwd, and file for each entry
+- **Enter/Space** plays (or stops) the cached audio, `/` filters (text, provider, voice, cwd, model, style), `d` deletes (with confirm)
 - Audio cached before history existed is listed as `legacy` entries
 - When stdout is not a terminal, a plain list is printed instead of the TUI
 - Set `ATTN_NO_HISTORY=1` to disable recording
@@ -111,7 +112,8 @@ attn history
 Create `~/.config/attn/config.yaml` to set API keys, provider order, and voice policy:
 
 ```yaml
-# When --provider / TTS_PROVIDER are unset, use the first known name.
+# Tried in order when --provider / TTS_PROVIDER are unset.
+# If the first fails at runtime, the next is tried automatically.
 provider_priority:
   - grok
   - mimo      # Xiaomi MiMo
@@ -156,6 +158,7 @@ mimo:
 | Preferred all banned / unknown | Fall back to catalog minus banned |
 | Catalog entirely banned | Built-in alert default voice (never re-enables banned names in the pool) |
 | Provider resolution | `--provider` → `TTS_PROVIDER` → first known `provider_priority` → built-in `grok`, `mimo`, `minimax` |
+| Provider fallback | When auto-selected (no `--provider` / `TTS_PROVIDER`), failed synthesis retries the rest of `provider_priority`. Explicit provider choice does not fall back. |
 
 For Groq and MiMo (closed catalogs), preferred names that are not in the built-in list are dropped. MiniMax allows preferred IDs outside the curated subset (custom/system voices).
 

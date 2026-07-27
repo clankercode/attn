@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 	"unicode"
 
@@ -73,40 +75,25 @@ func run(args []string) int {
 		return 1
 	}
 
-	text := cfg.Text
+	baseText := cfg.Text
 	if cfg.Polish {
-		polished := polishText(text)
-		text = polished
-		fmt.Printf("[polished] %s → %s\n", cfg.Text, text)
+		polished := polishText(baseText)
+		baseText = polished
+		fmt.Printf("[polished] %s → %s\n", cfg.Text, baseText)
 	}
-	if cfg.Style != "" && providerType == tts.ProviderMimo {
-		resolved := tts.ResolveStyle(cfg.Style)
-		text = "<style>" + resolved + "</style>" + text
-		fmt.Printf("[style] %s\n", resolved)
-	}
-
-	voice := tts.SelectVoice(providerType, cfg.VoicePrefs, cfg.Alert, cfg.Voice)
-	provider := providerFactory(providerType, voice, cfg.Model)
 
 	if cfg.DryRun {
+		voice := tts.SelectVoice(providerType, cfg.VoicePrefs, cfg.Alert, cfg.Voice)
 		fmt.Printf("[dry-run] provider=%s voice=%s → %s\n", providerType, voice, cfg.Output)
 		return 0
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	audioOut, err := provider.Synthesize(ctx, text, voice, cfg.Model)
+	fileCfg := cli.LoadConfig()
+	spokenText, voice, finalAudio, err := synthesizeWithProviders(&cfg, baseText, fileCfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	if audioOut == nil || len(audioOut.Data) == 0 {
-		fmt.Fprintln(os.Stderr, "error: provider returned no audio")
-		return 1
-	}
-
-	finalAudio := audioOut.Data
 
 	if cfg.Alert && !cfg.Silent {
 		alertFile, err := os.CreateTemp("", "attn-alert-*.wav")
@@ -123,7 +110,7 @@ func run(args []string) int {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
 		}
-		recordHistory(cfg, text, voice, finalAudio)
+		recordHistory(cfg, spokenText, voice, finalAudio)
 		fmt.Printf("Saved to %s (silent)\n", cfg.Output)
 		return 0
 	}
@@ -133,14 +120,91 @@ func run(args []string) int {
 		// failure can leave a valid artifact on disk. Record it so the file
 		// is still browsable via `attn history`.
 		if _, statErr := os.Stat(cfg.Output); statErr == nil {
-			recordHistory(cfg, text, voice, finalAudio)
+			recordHistory(cfg, spokenText, voice, finalAudio)
 		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
-	recordHistory(cfg, text, voice, finalAudio)
+	recordHistory(cfg, spokenText, voice, finalAudio)
 	fmt.Printf("Saved to %s\n", cfg.Output)
 	return 0
+}
+
+// synthesizeWithProviders tries each candidate provider until one succeeds.
+// On success it updates cfg.Provider and cfg.Output (extension) to match the
+// winning provider. When ProviderExplicit is true, only one candidate is tried.
+func synthesizeWithProviders(cfg *cli.Config, baseText string, fileCfg *cli.ConfigFile) (spokenText, voice string, data []byte, err error) {
+	candidates := cfg.ProviderCandidates
+	if len(candidates) == 0 {
+		candidates = []string{cfg.Provider}
+	}
+	if cfg.ProviderExplicit && len(candidates) > 1 {
+		candidates = candidates[:1]
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	var lastErr error
+	for i, name := range candidates {
+		pt := tts.ProviderType(name)
+		prefs := cli.VoicePrefsFor(fileCfg, pt)
+		if i == 0 && cfg.Provider == name {
+			// Prefer already-resolved prefs for the first (default) provider.
+			prefs = cfg.VoicePrefs
+		}
+		v := tts.SelectVoice(pt, prefs, cfg.Alert, cfg.Voice)
+
+		text := baseText
+		if cfg.Style != "" && pt == tts.ProviderMimo {
+			resolved := tts.ResolveStyle(cfg.Style)
+			text = "<style>" + resolved + "</style>" + text
+			fmt.Printf("[style] %s\n", resolved)
+		}
+
+		provider := providerFactory(pt, v, cfg.Model)
+		audioOut, synthErr := provider.Synthesize(ctx, text, v, cfg.Model)
+		if synthErr != nil {
+			lastErr = synthErr
+			if i+1 < len(candidates) {
+				fmt.Fprintf(os.Stderr, "warning: %s failed: %v; trying %s\n", name, synthErr, candidates[i+1])
+			}
+			continue
+		}
+		if audioOut == nil || len(audioOut.Data) == 0 {
+			lastErr = fmt.Errorf("provider returned no audio")
+			if i+1 < len(candidates) {
+				fmt.Fprintf(os.Stderr, "warning: %s failed: %v; trying %s\n", name, lastErr, candidates[i+1])
+			}
+			continue
+		}
+
+		cfg.Provider = name
+		cfg.Output = adjustOutputExt(cfg.Output, pt)
+		cfg.VoicePrefs = prefs
+		return text, v, audioOut.Data, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no providers available")
+	}
+	return "", "", nil, lastErr
+}
+
+// adjustOutputExt swaps .mp3/.wav on default cache paths to match the provider.
+// Custom -o paths are left unchanged unless they end in .mp3 or .wav.
+func adjustOutputExt(path string, pt tts.ProviderType) string {
+	want := ".mp3"
+	if pt == tts.ProviderGroq || pt == tts.ProviderMimo {
+		want = ".wav"
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == want {
+		return path
+	}
+	if ext == ".mp3" || ext == ".wav" {
+		return strings.TrimSuffix(path, ext) + want
+	}
+	return path
 }
 
 // recordHistory appends the generation to the history log. Failures are
@@ -149,6 +213,7 @@ func recordHistory(cfg cli.Config, spokenText, voice string, data []byte) {
 	if os.Getenv("ATTN_NO_HISTORY") == "1" {
 		return
 	}
+	cwd, _ := os.Getwd() // best-effort; empty if unavailable
 	err := history.Record(history.Entry{
 		Time:       time.Now(),
 		Text:       cfg.Text,
@@ -160,6 +225,7 @@ func recordHistory(cfg cli.Config, spokenText, voice string, data []byte) {
 		Alert:      cfg.Alert,
 		Path:       cfg.Output,
 		Bytes:      len(data),
+		CWD:        cwd,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: history not recorded: %v\n", err)

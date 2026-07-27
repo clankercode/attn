@@ -73,6 +73,12 @@ voices:
 	if cfg.Provider != "groq" {
 		t.Fatalf("expected provider from priority list, got %q", cfg.Provider)
 	}
+	if cfg.ProviderExplicit {
+		t.Fatal("auto-selected provider should not be marked explicit")
+	}
+	if len(cfg.ProviderCandidates) != 2 || cfg.ProviderCandidates[0] != "groq" || cfg.ProviderCandidates[1] != "minimax" {
+		t.Fatalf("expected candidates [groq minimax], got %v", cfg.ProviderCandidates)
+	}
 
 	// TTS_PROVIDER beats provider_priority.
 	t.Setenv("TTS_PROVIDER", "minimax")
@@ -83,6 +89,12 @@ voices:
 	}
 	if cfg.Provider != "minimax" {
 		t.Fatalf("TTS_PROVIDER should beat provider_priority, got %q", cfg.Provider)
+	}
+	if !cfg.ProviderExplicit {
+		t.Fatal("TTS_PROVIDER should mark provider as explicit")
+	}
+	if len(cfg.ProviderCandidates) != 1 || cfg.ProviderCandidates[0] != "minimax" {
+		t.Fatalf("explicit should be single candidate, got %v", cfg.ProviderCandidates)
 	}
 	t.Setenv("TTS_PROVIDER", "")
 	ResetConfigForTest(path)

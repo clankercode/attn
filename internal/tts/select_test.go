@@ -171,6 +171,38 @@ func TestResolveProvider(t *testing.T) {
 	}
 }
 
+func TestProviderCandidates(t *testing.T) {
+	got := ProviderCandidates("groq", []string{"minimax", "mimo"})
+	if len(got) != 1 || got[0] != ProviderGroq {
+		t.Fatalf("explicit should be single-element, got %v", got)
+	}
+
+	got = ProviderCandidates("", []string{"mimo", "groq", "minimax"})
+	if len(got) != 3 || got[0] != ProviderMimo || got[1] != ProviderGroq || got[2] != ProviderMinimax {
+		t.Fatalf("expected ordered priority, got %v", got)
+	}
+
+	got = ProviderCandidates("", []string{"grok", "nope", "grok", "mimo"})
+	if len(got) != 2 || got[0] != ProviderGrok || got[1] != ProviderMimo {
+		t.Fatalf("expected dedupe + skip unknown, got %v", got)
+	}
+
+	got = ProviderCandidates("", []string{"nope", "also-nope"})
+	if len(got) != 1 || got[0] != ProviderGrok {
+		t.Fatalf("all unknown should fall back to grok, got %v", got)
+	}
+
+	got = ProviderCandidates("", nil)
+	if len(got) != 3 || got[0] != ProviderGrok || got[1] != ProviderMimo || got[2] != ProviderMinimax {
+		t.Fatalf("nil priority should use default, got %v", got)
+	}
+
+	got = ProviderCandidates("xiaomi", nil)
+	if len(got) != 1 || got[0] != ProviderMimo {
+		t.Fatalf("xiaomi alias, got %v", got)
+	}
+}
+
 func TestRandomVoiceStillWorks(t *testing.T) {
 	// Backward-compat: RandomVoice remains a thin wrapper over full catalog.
 	withSeed(t, 99)

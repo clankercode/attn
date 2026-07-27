@@ -114,7 +114,7 @@ func (m *model) applyFilter() {
 			m.view = append(m.view, i)
 			continue
 		}
-		hay := strings.ToLower(e.Text + " " + e.Provider + " " + e.Voice + " " + e.Path)
+		hay := strings.ToLower(e.Text + " " + e.Provider + " " + e.Voice + " " + e.Path + " " + e.CWD + " " + e.Model + " " + e.Style)
 		if strings.Contains(hay, q) {
 			m.view = append(m.view, i)
 		}
@@ -208,6 +208,16 @@ func (m *model) renderDetail(e Entry) string {
 		b.WriteString(wrap.Render(v))
 		b.WriteString("\n")
 	}
+	// metaOrDim shows optional fields that may be absent on older entries.
+	metaOrDim := func(k, v, missingHint string) {
+		b.WriteString(styleHeaderMeta.Render(fmt.Sprintf("%-9s ", k)))
+		if v == "" {
+			b.WriteString(styleDim.Render(missingHint))
+		} else {
+			b.WriteString(wrap.Render(v))
+		}
+		b.WriteString("\n")
+	}
 	if e.Legacy {
 		meta("origin", "legacy (predates history recording)")
 	} else {
@@ -219,11 +229,12 @@ func (m *model) renderDetail(e Entry) string {
 			meta("alert", "yes")
 		}
 	}
+	metaOrDim("cwd", abbrevPath(e.CWD), "(not recorded)")
 	size := ""
 	if e.Bytes > 0 {
 		size = " (" + audio.FormatBytes(e.Bytes) + ")"
 	}
-	pathLine := e.Path + size
+	pathLine := abbrevPath(e.Path) + size
 	if e.Missing {
 		pathLine += "  " + styleMissing.Render("[file missing]")
 	}

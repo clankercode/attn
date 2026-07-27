@@ -70,6 +70,12 @@ type Config struct {
 	DebugPlayFile string
 	// VoicePrefs is the resolved preferred/banned/alert policy for Provider.
 	VoicePrefs tts.VoicePrefs
+	// ProviderExplicit is true when --provider or TTS_PROVIDER selected the
+	// provider (no runtime fallback to other candidates).
+	ProviderExplicit bool
+	// ProviderCandidates is the ordered list of providers to try. When
+	// ProviderExplicit is true this has a single element.
+	ProviderCandidates []string
 }
 
 var (
@@ -265,7 +271,10 @@ func Parse(args []string) (Config, error) {
 		priority = fileCfg.ProviderPriority
 	}
 
-	providerType := tts.ResolveProvider(*provider, priority)
+	explicitProvider := strings.TrimSpace(*provider)
+	providerExplicit := explicitProvider != ""
+	candidates := tts.ProviderCandidates(explicitProvider, priority)
+	providerType := candidates[0]
 	providerVal := string(providerType)
 
 	prefs := VoicePrefsFor(fileCfg, providerType)
@@ -281,22 +290,29 @@ func Parse(args []string) (Config, error) {
 		outPath = home + "/.tts-output/" + fmt.Sprintf("%d", ts) + "." + ext
 	}
 
+	candidateNames := make([]string, len(candidates))
+	for i, c := range candidates {
+		candidateNames[i] = string(c)
+	}
+
 	return Config{
-		Text:          text,
-		Output:        outPath,
-		Provider:      providerVal,
-		Voice:         *voice,
-		Model:         *model,
-		Style:         *style,
-		Alert:         *alert,
-		Fg:            *fg,
-		Polish:        *polish,
-		ListVoices:    *listVoices,
-		DryRun:        *dryRun,
-		Silent:        *silent,
-		Wait:          *wait,
-		DebugPlayFile: *debugPlay,
-		VoicePrefs:    prefs,
+		Text:               text,
+		Output:             outPath,
+		Provider:           providerVal,
+		Voice:              *voice,
+		Model:              *model,
+		Style:              *style,
+		Alert:              *alert,
+		Fg:                 *fg,
+		Polish:             *polish,
+		ListVoices:         *listVoices,
+		DryRun:             *dryRun,
+		Silent:             *silent,
+		Wait:               *wait,
+		DebugPlayFile:      *debugPlay,
+		VoicePrefs:         prefs,
+		ProviderExplicit:   providerExplicit,
+		ProviderCandidates: candidateNames,
 	}, nil
 }
 
@@ -334,12 +350,15 @@ Debug flags:
 
 Defaults:
   provider: --provider > TTS_PROVIDER > provider_priority in config > grok, mimo, minimax
+            (auto-selected providers fall back through the priority list on failure;
+             explicit --provider / TTS_PROVIDER does not fall back)
   voice: random from preferred pool (minus banned), or fixed alert_voice for --alert
   output: ~/.tts-output/<unique timestamp>.mp3 (or .wav for groq/mimo)
   history: JSONL at $XDG_DATA_HOME/attn/history.jsonl (ATTN_NO_HISTORY=1 to disable)
+           records text, provider, voice, cwd, and path; older entries without cwd still load
 
 Config file (~/.config/attn/config.yaml):
-  provider_priority: [grok, mimo, minimax]   # default when unset
+  provider_priority: [grok, mimo, minimax]   # fallback chain when provider is auto-selected
   voices:
     banned: [troy]                    # merged into every provider's bans
     # preferred: [...]                # only if valid for every provider that inherits it

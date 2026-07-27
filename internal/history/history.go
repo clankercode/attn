@@ -30,6 +30,7 @@ type Entry struct {
 	Alert      bool      `json:"alert,omitempty"`
 	Path       string    `json:"path"` // cached audio artifact
 	Bytes      int       `json:"bytes,omitempty"`
+	CWD        string    `json:"cwd,omitempty"` // working directory when attn was run
 	// Legacy is true for entries reconstructed from ~/.tts-output files that
 	// predate history recording (no metadata was saved at the time).
 	Legacy bool `json:"-"`

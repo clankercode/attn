@@ -39,6 +39,7 @@ func TestRecordAndLoad(t *testing.T) {
 		Voice:      "eve",
 		Path:       audioPath,
 		Bytes:      8,
+		CWD:        "/home/user/project",
 	}
 	if err := Record(e); err != nil {
 		t.Fatalf("Record: %v", err)
@@ -54,6 +55,9 @@ func TestRecordAndLoad(t *testing.T) {
 	got := entries[0]
 	if got.Text != "hello world" || got.Provider != "grok" || got.Voice != "eve" {
 		t.Errorf("round-trip mismatch: %+v", got)
+	}
+	if got.CWD != "/home/user/project" {
+		t.Errorf("cwd round-trip: got %q", got.CWD)
 	}
 	if got.Missing {
 		t.Error("entry should not be marked missing")
@@ -222,5 +226,49 @@ func TestNewestFirst(t *testing.T) {
 			order = append(order, en.Text)
 		}
 		t.Fatalf("not newest-first: %s", strings.Join(order, ","))
+	}
+}
+
+func TestAbbrevPath(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	if got := abbrevPath(tmp); got != "~" {
+		t.Errorf("home dir: got %q", got)
+	}
+	sub := filepath.Join(tmp, "src", "utils-attn")
+	if got := abbrevPath(sub); got != "~/src/utils-attn" {
+		t.Errorf("subdir: got %q", got)
+	}
+	if got := abbrevPath("/other/path"); got != "/other/path" {
+		t.Errorf("unrelated: got %q", got)
+	}
+	if got := abbrevPath(""); got != "" {
+		t.Errorf("empty: got %q", got)
+	}
+}
+
+func TestLoadMissingCWDIsEmpty(t *testing.T) {
+	tmp := setupEnv(t)
+	audioPath := filepath.Join(tmp, ".tts-output", "nocwd.mp3")
+	writeAudio(t, audioPath)
+
+	// Write a legacy-style JSONL line without cwd field.
+	path := Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"ts":"2026-07-25T12:00:00Z","text":"old","provider":"grok","voice":"eve","path":"` + audioPath + `"}` + "\n"
+	if err := os.WriteFile(path, []byte(line), 0644); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1, got %d", len(entries))
+	}
+	if entries[0].CWD != "" {
+		t.Errorf("missing cwd should be empty, got %q", entries[0].CWD)
 	}
 }

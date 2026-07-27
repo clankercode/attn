@@ -81,8 +81,12 @@ func printPlain(entries []Entry) {
 		if e.Missing {
 			flags = " [missing]"
 		}
-		fmt.Printf("%s  %-20s  %s%s\n\t%s\n",
-			e.Time.Local().Format("2006-01-02 15:04:05"), meta, e.Path, flags, oneLine(e.Label()))
+		cwd := abbrevPath(e.CWD)
+		if cwd == "" {
+			cwd = "-"
+		}
+		fmt.Printf("%s  %-24s  %-20s  %s%s\n\t%s\n",
+			e.Time.Local().Format("2006-01-02 15:04:05"), cwd, meta, abbrevPath(e.Path), flags, oneLine(e.Label()))
 	}
 }
 

@@ -4,11 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/clankercode/attn/internal/cli"
 	"github.com/clankercode/attn/internal/tts"
 )
 
@@ -97,6 +102,106 @@ func TestRunExitsNonZeroOnEmptyAudio(t *testing.T) {
 	code := run([]string{"hello"})
 	if code != 1 {
 		t.Fatalf("expected exit code 1 for empty audio, got %d", code)
+	}
+}
+
+type failThenOKProvider struct {
+	name string
+	fail bool
+}
+
+func (p *failThenOKProvider) Name() string { return p.name }
+
+func (p *failThenOKProvider) Synthesize(ctx context.Context, text, voice, model string) (*tts.AudioOutput, error) {
+	if p.fail {
+		return nil, fmt.Errorf("simulated %s failure", p.name)
+	}
+	return &tts.AudioOutput{Data: []byte("fake-audio-data")}, nil
+}
+
+func TestSynthesizeFallback(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("TTS_PROVIDER", "")
+	t.Setenv("ATTN_NO_HISTORY", "1")
+	cli.ResetConfigForTest(filepath.Join(tmp, "missing.yaml"))
+	t.Cleanup(func() { cli.ResetConfigForTest("") })
+
+	var tried []string
+	origFactory := providerFactory
+	providerFactory = func(pt tts.ProviderType, voice, model string) tts.Provider {
+		tried = append(tried, string(pt))
+		// First default candidate is grok — fail it; succeed on anything else.
+		return &failThenOKProvider{name: string(pt), fail: pt == tts.ProviderGrok}
+	}
+	t.Cleanup(func() { providerFactory = origFactory })
+
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStderr := os.Stderr
+	os.Stderr = stderrW
+	code := run([]string{"--silent", "-o", filepath.Join(tmp, "out.mp3"), "hello"})
+	stderrW.Close()
+	os.Stderr = oldStderr
+	stderrBytes, _ := io.ReadAll(stderrR)
+	stderrR.Close()
+
+	if code != 0 {
+		t.Fatalf("expected exit 0 after fallback, got %d; stderr=%s", code, stderrBytes)
+	}
+	if len(tried) < 2 {
+		t.Fatalf("expected at least 2 provider attempts, got %v", tried)
+	}
+	if tried[0] != "grok" {
+		t.Fatalf("expected first attempt grok, got %v", tried)
+	}
+	if !strings.Contains(string(stderrBytes), "grok failed") {
+		t.Fatalf("expected fallback warning in stderr, got %q", stderrBytes)
+	}
+	if !strings.Contains(string(stderrBytes), "trying") {
+		t.Fatalf("expected 'trying' in stderr, got %q", stderrBytes)
+	}
+}
+
+func TestExplicitProviderNoFallback(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("TTS_PROVIDER", "")
+	t.Setenv("ATTN_NO_HISTORY", "1")
+	cli.ResetConfigForTest(filepath.Join(tmp, "missing.yaml"))
+	t.Cleanup(func() { cli.ResetConfigForTest("") })
+
+	var tried []string
+	origFactory := providerFactory
+	providerFactory = func(pt tts.ProviderType, voice, model string) tts.Provider {
+		tried = append(tried, string(pt))
+		return &failThenOKProvider{name: string(pt), fail: true}
+	}
+	t.Cleanup(func() { providerFactory = origFactory })
+
+	code := run([]string{"--provider", "grok", "--silent", "-o", filepath.Join(tmp, "out.mp3"), "hello"})
+	if code != 1 {
+		t.Fatalf("expected exit 1, got %d", code)
+	}
+	if len(tried) != 1 || tried[0] != "grok" {
+		t.Fatalf("explicit provider must not fall back; tried %v", tried)
+	}
+}
+
+func TestAdjustOutputExt(t *testing.T) {
+	if got := adjustOutputExt("/tmp/x.mp3", tts.ProviderMimo); got != "/tmp/x.wav" {
+		t.Fatalf("mp3→wav for mimo: %q", got)
+	}
+	if got := adjustOutputExt("/tmp/x.wav", tts.ProviderGrok); got != "/tmp/x.mp3" {
+		t.Fatalf("wav→mp3 for grok: %q", got)
+	}
+	if got := adjustOutputExt("/tmp/x.mp3", tts.ProviderGrok); got != "/tmp/x.mp3" {
+		t.Fatalf("same ext unchanged: %q", got)
+	}
+	if got := adjustOutputExt("/tmp/x.bin", tts.ProviderMimo); got != "/tmp/x.bin" {
+		t.Fatalf("non-audio ext unchanged: %q", got)
 	}
 }
 
