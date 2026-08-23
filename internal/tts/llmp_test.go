@@ -8,11 +8,14 @@ import (
 
 func resetLLMPState(t *testing.T) {
 	t.Helper()
-	prev := llmpConfig
-	t.Cleanup(func() { llmpConfig = prev })
-	llmpConfig = LLMPConfig{}
+	prev := getLLMPConfig()
+	t.Cleanup(func() { SetLLMPConfig(prev) })
+	SetLLMPConfig(LLMPConfig{})
 	for _, env := range []string{"LLMP_API_KEY", "LLMP_KEY_FILE", "LLMP_BASE_URL"} {
-		os.Unsetenv(env)
+		if v, ok := os.LookupEnv(env); ok {
+			os.Unsetenv(env)
+			t.Cleanup(func() { os.Setenv(env, v) })
+		}
 	}
 }
 
@@ -25,7 +28,7 @@ func TestResolveLLMPBaseURLDefault(t *testing.T) {
 
 func TestResolveLLMPBaseURLConfig(t *testing.T) {
 	resetLLMPState(t)
-	llmpConfig = LLMPConfig{BaseURL: "http://10.42.0.8:24584/v1"}
+	SetLLMPConfig(LLMPConfig{BaseURL: "http://10.42.0.8:24584/v1"})
 	if got := ResolveLLMPBaseURL(); got != "http://10.42.0.8:24584/v1" {
 		t.Fatalf("got %q", got)
 	}
@@ -33,7 +36,7 @@ func TestResolveLLMPBaseURLConfig(t *testing.T) {
 
 func TestResolveLLMPBaseURLEnvWins(t *testing.T) {
 	resetLLMPState(t)
-	llmpConfig = LLMPConfig{BaseURL: "http://config.example/v1"}
+	SetLLMPConfig(LLMPConfig{BaseURL: "http://config.example/v1"})
 	t.Setenv("LLMP_BASE_URL", "http://env.example/v1")
 	if got := ResolveLLMPBaseURL(); got != "http://env.example/v1" {
 		t.Fatalf("got %q", got)
@@ -47,7 +50,7 @@ func TestResolveLLMPAPIKeyFromConfigKeyFile(t *testing.T) {
 	if err := os.WriteFile(kf, []byte("  sk-llmp-test-123\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	llmpConfig = LLMPConfig{KeyFile: kf}
+	SetLLMPConfig(LLMPConfig{KeyFile: kf})
 	key, src := ResolveLLMPAPIKeyWithSource()
 	if key != "sk-llmp-test-123" {
 		t.Fatalf("key = %q", key)
@@ -65,7 +68,7 @@ func TestResolveLLMPAPIKeyConfigKeyFileTilde(t *testing.T) {
 	if err := os.WriteFile(kf, []byte("sk-llmp-tilde\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	llmpConfig = LLMPConfig{KeyFile: "~/.llmp"}
+	SetLLMPConfig(LLMPConfig{KeyFile: "~/.llmp"})
 	if key := ResolveLLMPAPIKey(); key != "sk-llmp-tilde" {
 		t.Fatalf("key = %q", key)
 	}
@@ -179,23 +182,38 @@ func TestLlmpGrokVoiceSelectionNormalizesCase(t *testing.T) {
 }
 
 func TestProviderCandidatesIncludesLlmpGrok(t *testing.T) {
+	resetLLMPState(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// No credential anywhere: auto-selection skips llmp-grok.
 	cands := ProviderCandidates("", nil)
-	if len(cands) == 0 || cands[0] != ProviderLlmpGrok {
-		t.Fatalf("first default candidate = %v", cands)
+	if len(cands) == 0 || cands[0] != ProviderGrok {
+		t.Fatalf("without credential, first default candidate = %v, want grok first", cands)
 	}
-	// Explicit alias.
+	for _, c := range cands {
+		if c == ProviderLlmpGrok {
+			t.Fatalf("llmp-grok should be skipped without credential: %v", cands)
+		}
+	}
+
+	// With a key file: llmp-grok leads the default chain.
+	if err := os.WriteFile(filepath.Join(home, ".llmp"), []byte("sk-llmp-x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cands = ProviderCandidates("", nil)
+	if len(cands) == 0 || cands[0] != ProviderLlmpGrok {
+		t.Fatalf("with credential, first default candidate = %v", cands)
+	}
+
+	// Explicit alias always works, even without credential (error surfaces at synth).
 	if got := ResolveProvider("llmp", nil); got != ProviderLlmpGrok {
 		t.Fatalf("ResolveProvider(llmp) = %q", got)
 	}
 	if got := ResolveProvider("llmp-grok", nil); got != ProviderLlmpGrok {
 		t.Fatalf("ResolveProvider(llmp-grok) = %q", got)
 	}
-	// Priority list with the new provider.
-	cands = ProviderCandidates("", []string{"mimo", "llmp-grok", "grok"})
-	if len(cands) != 3 || cands[0] != ProviderMimo || cands[1] != ProviderLlmpGrok || cands[2] != ProviderGrok {
-		t.Fatalf("candidates = %v", cands)
-	}
-	// Unknown-only priority falls back to llmp-grok.
+	// Unknown-only priority falls back to llmp-grok (credential present).
 	cands = ProviderCandidates("", []string{"bogus"})
 	if len(cands) != 1 || cands[0] != ProviderLlmpGrok {
 		t.Fatalf("candidates = %v", cands)

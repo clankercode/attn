@@ -124,6 +124,10 @@ func TestSynthesizeFallback(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("TTS_PROVIDER", "")
 	t.Setenv("ATTN_NO_HISTORY", "1")
+	// An LLMP credential must resolve or auto-selection skips llmp-grok.
+	if err := os.WriteFile(filepath.Join(tmp, ".llmp"), []byte("sk-llmp-test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cli.ResetConfigForTest(filepath.Join(tmp, "missing.yaml"))
 	t.Cleanup(func() { cli.ResetConfigForTest("") })
 

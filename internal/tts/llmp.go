@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // LLMP Grok TTS — POST {base}/audio/speech on the llm-api-passthrough
@@ -17,6 +18,7 @@ import (
 // The gateway routes "grok-tts" to its Grok TTS upstream.
 // Auth: LLMP_API_KEY, config llmp.key_file, or LLMP_KEY_FILE / ~/.llmp key file.
 // Key files are read in-memory only (not injected into the process environment).
+// Note: --model is ignored (same as grok) — the gateway routes on "grok-tts".
 
 // DefaultLLMPBaseURL is the canonical public origin of the gateway.
 const DefaultLLMPBaseURL = "https://omni-dyn-00.amaroolabs.com/v1"
@@ -111,10 +113,22 @@ type LLMPConfig struct {
 }
 
 var llmpConfig LLMPConfig
+var llmpConfigMu sync.RWMutex
 
 // SetLLMPConfig records the config-file llmp stanza for credential/base
-// resolution. Called once from cli.LoadConfig.
-func SetLLMPConfig(c LLMPConfig) { llmpConfig = c }
+// resolution. Called from cli.applyAPIKeys whenever a config file is
+// (re)loaded; safe for concurrent use with the resolvers below.
+func SetLLMPConfig(c LLMPConfig) {
+	llmpConfigMu.Lock()
+	llmpConfig = c
+	llmpConfigMu.Unlock()
+}
+
+func getLLMPConfig() LLMPConfig {
+	llmpConfigMu.RLock()
+	defer llmpConfigMu.RUnlock()
+	return llmpConfig
+}
 
 // ResolveLLMPBaseURL returns the gateway OpenAI-compatible base URL.
 // Order: LLMP_BASE_URL → config llmp.base_url → DefaultLLMPBaseURL.
@@ -122,11 +136,15 @@ func ResolveLLMPBaseURL() string {
 	if b := strings.TrimSpace(os.Getenv("LLMP_BASE_URL")); b != "" {
 		return b
 	}
-	if b := strings.TrimSpace(llmpConfig.BaseURL); b != "" {
+	if b := strings.TrimSpace(getLLMPConfig().BaseURL); b != "" {
 		return b
 	}
 	return DefaultLLMPBaseURL
 }
+
+// HasLLMPAPIKey reports whether any LLMP credential source resolves.
+// Cheap local check (no network) used to skip llmp-grok in auto-selection.
+func HasLLMPAPIKey() bool { return ResolveLLMPAPIKey() != "" }
 
 // ResolveLLMPAPIKey returns the first usable LLMP Consumer key.
 // Order: LLMP_API_KEY → config llmp.key_file → LLMP_KEY_FILE → ~/.llmp.
@@ -160,7 +178,7 @@ func ResolveLLMPAPIKeyWithSource() (key, source string) {
 // llmpKeyFilePath resolves which key file to read.
 // Order: config llmp.key_file → LLMP_KEY_FILE → ~/.llmp.
 func llmpKeyFilePath() string {
-	if p := expandHome(strings.TrimSpace(llmpConfig.KeyFile)); p != "" {
+	if p := expandHome(strings.TrimSpace(getLLMPConfig().KeyFile)); p != "" {
 		return p
 	}
 	if p := expandHome(strings.TrimSpace(os.Getenv("LLMP_KEY_FILE"))); p != "" {

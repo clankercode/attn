@@ -230,6 +230,8 @@ var DefaultProviderPriority = []string{
 // Explicit provider → single-element slice (no fallback).
 // Otherwise → deduplicated provider_priority (or DefaultProviderPriority).
 // Unknown names are skipped. Always returns at least one known provider.
+// In auto mode, llmp-grok is skipped when no LLMP credential resolves, so
+// users without a key file don't pay a guaranteed-failure first attempt.
 func ProviderCandidates(explicit string, priority []string) []ProviderType {
 	explicit = strings.TrimSpace(explicit)
 	if explicit != "" {
@@ -248,6 +250,9 @@ func ProviderCandidates(explicit string, priority []string) []ProviderType {
 		pt := normalizeProviderName(p)
 		switch pt {
 		case ProviderGroq, ProviderGrok, ProviderMinimax, ProviderMimo, ProviderLlmpGrok:
+			if pt == ProviderLlmpGrok && !HasLLMPAPIKey() {
+				continue
+			}
 			if _, ok := seen[pt]; ok {
 				continue
 			}
@@ -268,6 +273,17 @@ func ProviderCandidates(explicit string, priority []string) []ProviderType {
 // Aliases: "xiaomi" → mimo, "llmp"/"llmp_grok" → llmp-grok.
 func ResolveProvider(explicit string, priority []string) ProviderType {
 	return ProviderCandidates(explicit, priority)[0]
+}
+
+// KnownProvider reports whether name resolves to a supported provider
+// (aliases included).
+func KnownProvider(name string) bool {
+	switch normalizeProviderName(name) {
+	case ProviderGroq, ProviderGrok, ProviderMinimax, ProviderMimo, ProviderLlmpGrok:
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeProviderName(name string) ProviderType {

@@ -120,6 +120,7 @@ func LoadConfig() *ConfigFile {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		// Missing file is normal; do not warn.
+		applyLLMPConfig(nil)
 		return nil
 	}
 	var cfg ConfigFile
@@ -128,9 +129,11 @@ func LoadConfig() *ConfigFile {
 		// Cache empty defaults so we do not re-warn, and callers get a
 		// consistent "no custom settings" result.
 		globalConfig = &ConfigFile{}
+		applyLLMPConfig(globalConfig)
 		return globalConfig
 	}
 	globalConfig = &cfg
+	applyLLMPConfig(globalConfig)
 	return globalConfig
 }
 
@@ -226,8 +229,17 @@ func applyAPIKeys(cfg *ConfigFile) {
 	if envEmpty("MIMO_BASE_URL") && cfg.Mimo.BaseURL != "" {
 		os.Setenv("MIMO_BASE_URL", cfg.Mimo.BaseURL)
 	}
-	// Hand the llmp stanza to the tts package (in-memory; no env injection —
-	// ResolveLLMPAPIKey reads the key file directly).
+}
+
+// applyLLMPConfig hands the llmp stanza to the tts package (in-memory; no env
+// injection — ResolveLLMPAPIKey reads the key file directly). Called from
+// LoadConfig so the tts package always tracks the currently loaded config,
+// including after ResetConfigForTest.
+func applyLLMPConfig(cfg *ConfigFile) {
+	if cfg == nil {
+		tts.SetLLMPConfig(tts.LLMPConfig{})
+		return
+	}
 	tts.SetLLMPConfig(tts.LLMPConfig{
 		KeyFile: cfg.Llmp.KeyFile,
 		BaseURL: cfg.Llmp.BaseURL,
@@ -297,6 +309,9 @@ func Parse(args []string) (Config, error) {
 
 	explicitProvider := strings.TrimSpace(*provider)
 	providerExplicit := explicitProvider != ""
+	if providerExplicit && !tts.KnownProvider(explicitProvider) {
+		return Config{}, fmt.Errorf("unknown provider %q (known: llmp-grok, grok, groq, mimo, minimax)", explicitProvider)
+	}
 	candidates := tts.ProviderCandidates(explicitProvider, priority)
 	providerType := candidates[0]
 	providerVal := string(providerType)
@@ -374,6 +389,7 @@ Debug flags:
 
 Defaults:
   provider: --provider > TTS_PROVIDER > provider_priority in config > llmp-grok, grok, mimo, minimax
+            (auto-selection skips llmp-grok when no LLMP credential resolves)
             (auto-selected providers fall back through the priority list on failure;
              explicit --provider / TTS_PROVIDER does not fall back)
   voice: random from preferred pool (minus banned), or fixed alert_voice for --alert

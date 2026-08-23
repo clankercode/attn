@@ -2,6 +2,8 @@ package tts
 
 import (
 	"math/rand"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -141,6 +143,15 @@ func TestNormalizePrefsTrims(t *testing.T) {
 }
 
 func TestResolveProvider(t *testing.T) {
+	// Default-chain expectations assume an LLMP credential is resolvable
+	// (otherwise auto-selection skips llmp-grok — covered in llmp_test.go).
+	resetLLMPState(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, ".llmp"), []byte("sk-llmp-test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	if got := ResolveProvider("groq", []string{"minimax"}); got != ProviderGroq {
 		t.Fatalf("explicit should win, got %s", got)
 	}
@@ -172,6 +183,13 @@ func TestResolveProvider(t *testing.T) {
 }
 
 func TestProviderCandidates(t *testing.T) {
+	resetLLMPState(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, ".llmp"), []byte("sk-llmp-test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	got := ProviderCandidates("groq", []string{"minimax", "mimo"})
 	if len(got) != 1 || got[0] != ProviderGroq {
 		t.Fatalf("explicit should be single-element, got %v", got)

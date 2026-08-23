@@ -20,9 +20,30 @@ func TestParseReturnsErrorForInvalidFlags(t *testing.T) {
 	}
 }
 
+func TestParseRejectsUnknownProvider(t *testing.T) {
+	ResetConfigForTest(filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Cleanup(func() { ResetConfigForTest("") })
+
+	if _, err := Parse([]string{"--provider", "bogus", "hello"}); err == nil {
+		t.Fatal("expected error for unknown provider")
+	}
+	if _, err := Parse([]string{"--provider", "llmp", "hello"}); err != nil {
+		t.Fatalf("llmp alias should parse, got %v", err)
+	}
+	if _, err := Parse([]string{"--provider", "xiaomi", "hello"}); err != nil {
+		t.Fatalf("xiaomi alias should parse, got %v", err)
+	}
+}
+
 func TestParseGeneratesUniqueDefaultOutputs(t *testing.T) {
 	// Isolate from the developer's real config.
-	ResetConfigForTest(filepath.Join(t.TempDir(), "missing.yaml"))
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	// Plant a key file so auto-selection keeps llmp-grok first.
+	if err := os.WriteFile(filepath.Join(tmp, ".llmp"), []byte("sk-llmp-test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ResetConfigForTest(filepath.Join(tmp, "missing.yaml"))
 	t.Cleanup(func() { ResetConfigForTest("") })
 	t.Setenv("TTS_PROVIDER", "")
 

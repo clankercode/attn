@@ -189,7 +189,7 @@ attn --dry-run "hello"
 - `MINIMAX_API_KEY`: API key for Minimax TTS provider
 - `MIMO_API_KEY`: API key for MiMo TTS provider
 - `TTS_PROVIDER`: default provider (`llmp-grok`, `minimax`, `groq`, `grok`, or `mimo`)
-- `GROK_TTS_LANGUAGE` / `XAI_TTS_LANGUAGE`: BCP-47 language for Grok TTS (default `en`)
+- `GROK_TTS_LANGUAGE` / `XAI_TTS_LANGUAGE`: BCP-47 language for Grok TTS — both `grok` and `llmp-grok` (default `en`)
 
 Environment variables override keys from the config file when both are set.
 
@@ -226,7 +226,11 @@ attn --provider grok --list-voices
 Same Grok voices served through the llm-api-passthrough gateway
 (`POST {base}/audio/speech` with an OpenAI-shaped body; the gateway routes
 `grok-tts` to its Grok TTS upstream). This is the first provider in the
-built-in default priority, so it wins automatically when its key file exists.
+built-in default priority; in auto-selection mode it is tried first whenever
+an LLMP credential resolves, and skipped silently when none does. The
+Grok-shaped `/tts` alias is not used — the gateway rejects it with
+`input must be a non-empty string`. `--model` is ignored (same as `grok`);
+the gateway routes on `grok-tts`.
 
 1. Put your Consumer key in `~/.llmp` (or set `LLMP_API_KEY`)
 2. Credential resolution order:
