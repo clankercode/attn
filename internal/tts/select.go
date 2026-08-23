@@ -63,6 +63,9 @@ func Catalog(provider ProviderType) []string {
 		return append([]string(nil), VoiceListGroq...)
 	case ProviderGrok:
 		return append([]string(nil), VoiceListGrok...)
+	case ProviderLlmpGrok:
+		// Same Grok roster, served through the LLMP gateway.
+		return append([]string(nil), VoiceListGrok...)
 	case ProviderMimo:
 		return append([]string(nil), VoiceListMimo...)
 	default:
@@ -90,6 +93,8 @@ func DefaultAlertVoice(provider ProviderType) string {
 		return "daniel"
 	case ProviderGrok:
 		return "rex"
+	case ProviderLlmpGrok:
+		return "rex"
 	case ProviderMimo:
 		return "mimo_default"
 	default:
@@ -106,13 +111,13 @@ func DefaultAlertVoice(provider ProviderType) string {
 // entry, then a fixed last-resort default so synthesis can still run.
 func SelectVoice(provider ProviderType, prefs VoicePrefs, alert bool, explicit string) string {
 	prefs = NormalizePrefs(prefs)
-	if provider == ProviderGrok {
+	if provider == ProviderGrok || provider == ProviderLlmpGrok {
 		// Case-insensitive IDs: normalize prefs so bans/preferred match the catalog.
 		prefs = normalizeGrokPrefs(prefs)
 	}
 	if explicit != "" {
 		v := strings.TrimSpace(explicit)
-		if provider == ProviderGrok {
+		if provider == ProviderGrok || provider == ProviderLlmpGrok {
 			return strings.ToLower(v)
 		}
 		return v
@@ -213,8 +218,9 @@ func filterOut(items []string, banned map[string]struct{}) []string {
 
 // DefaultProviderPriority is used when neither --provider / TTS_PROVIDER nor
 // config provider_priority is set. First known name wins.
-// Order: Grok (xAI) → MiMo (Xiaomi) → MiniMax.
+// Order: LLMP Grok (gateway) → Grok (xAI) → MiMo (Xiaomi) → MiniMax.
 var DefaultProviderPriority = []string{
+	string(ProviderLlmpGrok),
 	string(ProviderGrok),
 	string(ProviderMimo),
 	string(ProviderMinimax),
@@ -241,7 +247,7 @@ func ProviderCandidates(explicit string, priority []string) []ProviderType {
 		}
 		pt := normalizeProviderName(p)
 		switch pt {
-		case ProviderGroq, ProviderGrok, ProviderMinimax, ProviderMimo:
+		case ProviderGroq, ProviderGrok, ProviderMinimax, ProviderMimo, ProviderLlmpGrok:
 			if _, ok := seen[pt]; ok {
 				continue
 			}
@@ -250,16 +256,16 @@ func ProviderCandidates(explicit string, priority []string) []ProviderType {
 		}
 	}
 	if len(out) == 0 {
-		return []ProviderType{ProviderGrok}
+		return []ProviderType{ProviderLlmpGrok}
 	}
 	return out
 }
 
 // ResolveProvider picks the default provider when the user did not specify one.
 // priority is an ordered list (first wins). When empty, DefaultProviderPriority
-// is used (grok → mimo → minimax).
+// is used (llmp-grok → grok → mimo → minimax).
 // explicit comes from --provider or TTS_PROVIDER (already resolved by the flag package).
-// Aliases: "xiaomi" → mimo.
+// Aliases: "xiaomi" → mimo, "llmp"/"llmp_grok" → llmp-grok.
 func ResolveProvider(explicit string, priority []string) ProviderType {
 	return ProviderCandidates(explicit, priority)[0]
 }
@@ -268,6 +274,8 @@ func normalizeProviderName(name string) ProviderType {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "xiaomi", "mimo":
 		return ProviderMimo
+	case "llmp", "llmp_grok", "llmp-grok":
+		return ProviderLlmpGrok
 	case "grok":
 		return ProviderGrok
 	case "groq":

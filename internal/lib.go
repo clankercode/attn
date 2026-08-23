@@ -245,6 +245,12 @@ func printVoices(pt tts.ProviderType) int {
 			fmt.Printf("  %s\n", v)
 		}
 		fmt.Printf("\n%d voices. Custom IDs from the xAI console also work with --voice.\n", len(tts.VoiceListGrok))
+	case tts.ProviderLlmpGrok:
+		fmt.Println("LLMP Grok voices (via llm-api-passthrough gateway; same roster as grok):")
+		for _, v := range tts.VoiceListGrok {
+			fmt.Printf("  %s\n", v)
+		}
+		fmt.Printf("\n%d voices. Custom IDs also work with --voice.\n", len(tts.VoiceListGrok))
 	case tts.ProviderMinimax:
 		fmt.Println("MiniMax voices (speech-2.8-hd):")
 		for _, v := range tts.VoiceListMinimax {

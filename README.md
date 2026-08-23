@@ -60,6 +60,7 @@ attn -o output.mp3 "Save this message to a file"
 ### Specify Provider
 
 ```bash
+attn --provider llmp-grok "Using Grok via the LLMP gateway"
 attn --provider groq "Using Groq API"
 attn --provider grok "Using Grok (xAI) TTS"
 attn --provider minimax "Using Minimax API"
@@ -115,6 +116,7 @@ Create `~/.config/attn/config.yaml` to set API keys, provider order, and voice p
 # Tried in order when --provider / TTS_PROVIDER are unset.
 # If the first fails at runtime, the next is tried automatically.
 provider_priority:
+  - llmp-grok
   - grok
   - mimo      # Xiaomi MiMo
   - minimax
@@ -134,6 +136,14 @@ groq:
 grok:
   # api_key optional — auto-loads from XAI_API_KEY or ~/.grok*/auth.json
   preferred: [eve, ara, leo]
+  alert_voice: rex
+
+llmp:
+  # Consumer key file for the llm-api-passthrough gateway (default ~/.llmp;
+  # LLMP_API_KEY / LLMP_KEY_FILE env vars also work).
+  # key_file: ~/.llmp
+  # base_url: "https://omni-dyn-00.amaroolabs.com/v1"   # optional; LLMP_BASE_URL also works
+  preferred: [eve, ara, leo]             # same Grok voice roster as grok:
   alert_voice: rex
 
 minimax:
@@ -157,7 +167,7 @@ mimo:
 | Normal speech, no `--voice` | Uniform random from `preferred` pool minus banned; if preferred is empty, from full catalog minus banned |
 | Preferred all banned / unknown | Fall back to catalog minus banned |
 | Catalog entirely banned | Built-in alert default voice (never re-enables banned names in the pool) |
-| Provider resolution | `--provider` → `TTS_PROVIDER` → first known `provider_priority` → built-in `grok`, `mimo`, `minimax` |
+| Provider resolution | `--provider` → `TTS_PROVIDER` → first known `provider_priority` → built-in `llmp-grok`, `grok`, `mimo`, `minimax` |
 | Provider fallback | When auto-selected (no `--provider` / `TTS_PROVIDER`), failed synthesis retries the rest of `provider_priority`. Explicit provider choice does not fall back. |
 
 For Groq and MiMo (closed catalogs), preferred names that are not in the built-in list are dropped. MiniMax allows preferred IDs outside the curated subset (custom/system voices).
@@ -166,16 +176,19 @@ Explicit CLI flags always win over the config file. Check resolution without cal
 
 ```bash
 attn --dry-run "hello"
-# [dry-run] provider=grok voice=eve → /home/you/.tts-output/....mp3
+# [dry-run] provider=llmp-grok voice=eve → /home/you/.tts-output/....mp3
 ```
 
 ### Environment Variables
 
 - `GROQ_API_KEY`: API key for Groq TTS provider
 - `XAI_API_KEY` / `GROK_API_KEY`: API key for Grok (xAI) TTS (also auto-detected)
+- `LLMP_API_KEY`: Consumer key for the LLMP gateway (llmp-grok provider)
+- `LLMP_KEY_FILE`: path to the LLMP Consumer key file (default `~/.llmp`)
+- `LLMP_BASE_URL`: LLMP gateway OpenAI-compatible base URL (default `https://omni-dyn-00.amaroolabs.com/v1`)
 - `MINIMAX_API_KEY`: API key for Minimax TTS provider
 - `MIMO_API_KEY`: API key for MiMo TTS provider
-- `TTS_PROVIDER`: default provider (`minimax`, `groq`, `grok`, or `mimo`)
+- `TTS_PROVIDER`: default provider (`llmp-grok`, `minimax`, `groq`, `grok`, or `mimo`)
 - `GROK_TTS_LANGUAGE` / `XAI_TTS_LANGUAGE`: BCP-47 language for Grok TTS (default `en`)
 
 Environment variables override keys from the config file when both are set.
@@ -206,6 +219,28 @@ attn --provider groq "Test message"
 attn --provider grok "Test message"
 attn --provider grok --voice eve "Hello from Eve"
 attn --provider grok --list-voices
+```
+
+#### LLMP Grok (llm-api-passthrough gateway)
+
+Same Grok voices served through the llm-api-passthrough gateway
+(`POST {base}/audio/speech` with an OpenAI-shaped body; the gateway routes
+`grok-tts` to its Grok TTS upstream). This is the first provider in the
+built-in default priority, so it wins automatically when its key file exists.
+
+1. Put your Consumer key in `~/.llmp` (or set `LLMP_API_KEY`)
+2. Credential resolution order:
+   1. `LLMP_API_KEY` env
+   2. `key_file` under `llmp:` in the config file
+   3. `LLMP_KEY_FILE` env
+   4. `~/.llmp`
+3. Base URL resolution order: `LLMP_BASE_URL` env → `base_url` under `llmp:` →
+   `https://omni-dyn-00.amaroolabs.com/v1`
+
+```bash
+attn --provider llmp-grok "Test message"
+attn --provider llmp-grok --voice eve "Hello from Eve"
+attn --provider llmp-grok --list-voices
 ```
 
 #### Minimax
@@ -242,6 +277,7 @@ just test
 ```bash
 just test-groq
 just test-grok
+just test-llmp
 just test-minimax
 ```
 

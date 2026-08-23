@@ -30,6 +30,10 @@ test-groq:
 test-grok:
     ./attn-tool -o /tmp/attn-test-grok.mp3 --provider grok --silent "Testing grok TTS"
 
+# Test llmp-grok via the LLMP gateway (uses LLMP_API_KEY or ~/.llmp)
+test-llmp:
+    ./attn-tool -o /tmp/attn-test-llmp.mp3 --provider llmp-grok --silent "Testing LLMP grok TTS"
+
 # Test minimax (requires API key with TTS access)
 test-minimax:
     ./attn-tool -o /tmp/attn-test-minimax.mp3 --provider minimax "Testing minimax TTS"

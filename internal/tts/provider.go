@@ -20,10 +20,11 @@ type Provider interface {
 type ProviderType string
 
 const (
-	ProviderMinimax ProviderType = "minimax"
-	ProviderGroq    ProviderType = "groq"
-	ProviderGrok    ProviderType = "grok"
-	ProviderMimo    ProviderType = "mimo"
+	ProviderMinimax  ProviderType = "minimax"
+	ProviderGroq     ProviderType = "groq"
+	ProviderGrok     ProviderType = "grok"
+	ProviderMimo     ProviderType = "mimo"
+	ProviderLlmpGrok ProviderType = "llmp-grok"
 )
 
 func NewProvider(t ProviderType, voice, model string) Provider {
@@ -34,6 +35,8 @@ func NewProvider(t ProviderType, voice, model string) Provider {
 		return newGrok(voice, model)
 	case ProviderMimo:
 		return newMimo(voice, model)
+	case ProviderLlmpGrok:
+		return newLlmpGrok(voice, model)
 	default:
 		return newMinimax(voice, model)
 	}

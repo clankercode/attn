@@ -27,6 +27,7 @@ type ConfigFile struct {
 	Grok    ProviderConfig `yaml:"grok"`
 	Minimax ProviderConfig `yaml:"minimax"`
 	Mimo    MimoConfig     `yaml:"mimo"`
+	Llmp    LlmpConfig     `yaml:"llmp"`
 }
 
 // GlobalVoices are cross-provider defaults.
@@ -46,6 +47,17 @@ type ProviderConfig struct {
 // MimoConfig holds MiMo credentials, optional base URL, and voice prefs.
 type MimoConfig struct {
 	APIKey     string   `yaml:"api_key"`
+	BaseURL    string   `yaml:"base_url"`
+	Preferred  []string `yaml:"preferred"`
+	Banned     []string `yaml:"banned"`
+	AlertVoice string   `yaml:"alert_voice"`
+}
+
+// LlmpConfig holds LLMP gateway settings and llmp-grok voice prefs.
+// KeyFile points at a Consumer key file (default ~/.llmp); BaseURL overrides
+// the gateway OpenAI-compatible base (default https://omni-dyn-00.amaroolabs.com/v1).
+type LlmpConfig struct {
+	KeyFile    string   `yaml:"key_file"`
 	BaseURL    string   `yaml:"base_url"`
 	Preferred  []string `yaml:"preferred"`
 	Banned     []string `yaml:"banned"`
@@ -140,6 +152,12 @@ func VoicePrefsFor(cfg *ConfigFile, provider tts.ProviderType) tts.VoicePrefs {
 		pc = cfg.Groq
 	case tts.ProviderGrok:
 		pc = cfg.Grok
+	case tts.ProviderLlmpGrok:
+		pc = ProviderConfig{
+			Preferred:  cfg.Llmp.Preferred,
+			Banned:     cfg.Llmp.Banned,
+			AlertVoice: cfg.Llmp.AlertVoice,
+		}
 	case tts.ProviderMimo:
 		pc = ProviderConfig{
 			APIKey:     cfg.Mimo.APIKey,
@@ -208,6 +226,12 @@ func applyAPIKeys(cfg *ConfigFile) {
 	if envEmpty("MIMO_BASE_URL") && cfg.Mimo.BaseURL != "" {
 		os.Setenv("MIMO_BASE_URL", cfg.Mimo.BaseURL)
 	}
+	// Hand the llmp stanza to the tts package (in-memory; no env injection —
+	// ResolveLLMPAPIKey reads the key file directly).
+	tts.SetLLMPConfig(tts.LLMPConfig{
+		KeyFile: cfg.Llmp.KeyFile,
+		BaseURL: cfg.Llmp.BaseURL,
+	})
 }
 
 func loadMimoKeyFile() {
@@ -242,7 +266,7 @@ func Parse(args []string) (Config, error) {
 
 	var (
 		output     = fs.String("o", "", "Output file path (default: ~/.tts-output/<timestamp>.mp3)")
-		provider   = fs.String("provider", os.Getenv("TTS_PROVIDER"), "Provider: minimax, groq, grok, or mimo")
+		provider   = fs.String("provider", os.Getenv("TTS_PROVIDER"), "Provider: llmp-grok, minimax, groq, grok, or mimo")
 		voice      = fs.String("voice", "", "Voice ID")
 		model      = fs.String("model", "", "Model ID (provider-specific)")
 		style      = fs.String("style", "", "MiMo style preset (e.g. 开心, Happy, 东北话)")
@@ -328,7 +352,7 @@ Examples:
   attn --provider mimo --voice default_zh --style Happy "hello world"
 
 Common flags:
-  --provider minimax|groq|grok|mimo  Choose the TTS backend
+  --provider llmp-grok|minimax|groq|grok|mimo  Choose the TTS backend
   --voice NAME              Pick a specific voice
   --model NAME              Model ID (provider-specific)
   --style PRESET            MiMo style: 开心, Happy, 东北话, etc.
@@ -349,7 +373,7 @@ Debug flags:
   --debug-play-file PATH    Play a file directly and exit (skip synthesis)
 
 Defaults:
-  provider: --provider > TTS_PROVIDER > provider_priority in config > grok, mimo, minimax
+  provider: --provider > TTS_PROVIDER > provider_priority in config > llmp-grok, grok, mimo, minimax
             (auto-selected providers fall back through the priority list on failure;
              explicit --provider / TTS_PROVIDER does not fall back)
   voice: random from preferred pool (minus banned), or fixed alert_voice for --alert
@@ -379,5 +403,10 @@ Config file (~/.config/attn/config.yaml):
     api_key: ...
     preferred: [mimo_default]
     alert_voice: mimo_default
+  llmp:
+    # key_file: ~/.llmp           # Consumer key file (default ~/.llmp; LLMP_API_KEY / LLMP_KEY_FILE also work)
+    # base_url: https://omni-dyn-00.amaroolabs.com/v1   # LLMP_BASE_URL also works
+    preferred: [eve, ara, leo]    # same Grok voice roster as grok
+    alert_voice: rex
 `)
 }

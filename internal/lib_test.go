@@ -131,8 +131,8 @@ func TestSynthesizeFallback(t *testing.T) {
 	origFactory := providerFactory
 	providerFactory = func(pt tts.ProviderType, voice, model string) tts.Provider {
 		tried = append(tried, string(pt))
-		// First default candidate is grok — fail it; succeed on anything else.
-		return &failThenOKProvider{name: string(pt), fail: pt == tts.ProviderGrok}
+		// First default candidate is llmp-grok — fail it; succeed on anything else.
+		return &failThenOKProvider{name: string(pt), fail: pt == tts.ProviderLlmpGrok}
 	}
 	t.Cleanup(func() { providerFactory = origFactory })
 
@@ -154,10 +154,10 @@ func TestSynthesizeFallback(t *testing.T) {
 	if len(tried) < 2 {
 		t.Fatalf("expected at least 2 provider attempts, got %v", tried)
 	}
-	if tried[0] != "grok" {
-		t.Fatalf("expected first attempt grok, got %v", tried)
+	if tried[0] != "llmp-grok" {
+		t.Fatalf("expected first attempt llmp-grok, got %v", tried)
 	}
-	if !strings.Contains(string(stderrBytes), "grok failed") {
+	if !strings.Contains(string(stderrBytes), "llmp-grok failed") {
 		t.Fatalf("expected fallback warning in stderr, got %q", stderrBytes)
 	}
 	if !strings.Contains(string(stderrBytes), "trying") {

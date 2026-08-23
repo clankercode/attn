@@ -153,15 +153,15 @@ func TestResolveProvider(t *testing.T) {
 	if got := ResolveProvider("", []string{"grok"}); got != ProviderGrok {
 		t.Fatalf("expected grok from priority, got %s", got)
 	}
-	if got := ResolveProvider("", nil); got != ProviderGrok {
-		t.Fatalf("expected built-in default grok, got %s", got)
+	if got := ResolveProvider("", nil); got != ProviderLlmpGrok {
+		t.Fatalf("expected built-in default llmp-grok, got %s", got)
 	}
-	if got := ResolveProvider("", []string{}); got != ProviderGrok {
-		t.Fatalf("expected built-in default grok for empty priority, got %s", got)
+	if got := ResolveProvider("", []string{}); got != ProviderLlmpGrok {
+		t.Fatalf("expected built-in default llmp-grok for empty priority, got %s", got)
 	}
-	// Default chain: grok → mimo → minimax (first wins).
-	if got := ResolveProvider("", DefaultProviderPriority); got != ProviderGrok {
-		t.Fatalf("expected grok first in default priority, got %s", got)
+	// Default chain: llmp-grok → grok → mimo → minimax (first wins).
+	if got := ResolveProvider("", DefaultProviderPriority); got != ProviderLlmpGrok {
+		t.Fatalf("expected llmp-grok first in default priority, got %s", got)
 	}
 	if got := ResolveProvider("xiaomi", nil); got != ProviderMimo {
 		t.Fatalf("xiaomi alias should resolve to mimo, got %s", got)
@@ -188,12 +188,12 @@ func TestProviderCandidates(t *testing.T) {
 	}
 
 	got = ProviderCandidates("", []string{"nope", "also-nope"})
-	if len(got) != 1 || got[0] != ProviderGrok {
-		t.Fatalf("all unknown should fall back to grok, got %v", got)
+	if len(got) != 1 || got[0] != ProviderLlmpGrok {
+		t.Fatalf("all unknown should fall back to llmp-grok, got %v", got)
 	}
 
 	got = ProviderCandidates("", nil)
-	if len(got) != 3 || got[0] != ProviderGrok || got[1] != ProviderMimo || got[2] != ProviderMinimax {
+	if len(got) != 4 || got[0] != ProviderLlmpGrok || got[1] != ProviderGrok || got[2] != ProviderMimo || got[3] != ProviderMinimax {
 		t.Fatalf("nil priority should use default, got %v", got)
 	}
 
