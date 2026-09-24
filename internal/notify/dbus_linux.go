@@ -3,9 +3,11 @@
 package notify
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -13,6 +15,10 @@ import (
 const (
 	busName = "org.freedesktop.Notifications"
 	objPath = dbus.ObjectPath("/org/freedesktop/Notifications")
+
+	// callTimeout bounds each call to the notification server, so a wedged
+	// server (e.g. a hung plasmashell) cannot stall playback or the caller.
+	callTimeout = 2 * time.Second
 )
 
 type dbusServer struct {
@@ -56,12 +62,15 @@ func Connect() (Server, error) {
 		events:  make(chan Event, 16),
 		done:    make(chan struct{}),
 	}
+	// Also a liveness probe: no answer means no usable notification server.
 	var caps []string
-	if err := s.obj.Call(busName+".GetCapabilities", 0).Store(&caps); err == nil {
-		for _, c := range caps {
-			if c == "body-markup" {
-				s.markup = true
-			}
+	if err := s.call(busName + ".GetCapabilities").Store(&caps); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	for _, c := range caps {
+		if c == "body-markup" {
+			s.markup = true
 		}
 	}
 	conn.Signal(s.signals)
@@ -116,15 +125,23 @@ func (s *dbusServer) Show(replaceID uint32, sp Spec) (uint32, error) {
 		hints[k] = dbus.MakeVariant(v)
 	}
 	var id uint32
-	err := s.obj.Call(busName+".Notify", 0,
+	err := s.call(busName+".Notify",
 		sp.AppName, replaceID, sp.Icon, sp.Summary, sp.Body,
 		sp.Actions, hints, sp.Timeout,
 	).Store(&id)
 	return id, err
 }
 
+// call makes a method call bounded by callTimeout.
+func (s *dbusServer) call(method string, args ...any) *dbus.Call {
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	return s.obj.CallWithContext(ctx, method, 0, args...)
+}
+
+// Close is fire-and-forget: the reply carries nothing we need.
 func (s *dbusServer) Close(id uint32) {
-	s.obj.Call(busName+".CloseNotification", 0, id)
+	s.obj.Call(busName+".CloseNotification", dbus.FlagNoReplyExpected, id)
 }
 
 func (s *dbusServer) Events() <-chan Event { return s.events }

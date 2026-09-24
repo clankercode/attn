@@ -56,14 +56,21 @@ func run(args []string) int {
 			fmt.Fprintf(os.Stderr, "error: reading debug file: %v\n", err)
 			return 1
 		}
-		tmpOutput := cfg.DebugPlayFile + ".attn-debug-tmp"
+		// The detached player reads this copy after we exit (and again on
+		// Replay), so it lives in the temp dir and is not removed here. Keep
+		// the extension: the decoder picks the format from it.
+		tmp, err := os.CreateTemp("", "attn-debug-*"+filepath.Ext(cfg.DebugPlayFile))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: creating debug copy: %v\n", err)
+			return 1
+		}
+		tmp.Close()
 		meta := notificationMeta(cli.LoadConfig(), "debug: "+filepath.Base(cfg.DebugPlayFile), false)
-		meta.Linger = 0 // the temp copy is removed below, so Replay could not work
-		if err := audio.PlayAndSave(data, tmpOutput, true, false, false, meta); err != nil {
+		if err := audio.PlayAndSave(data, tmp.Name(), true, false, false, meta); err != nil {
+			os.Remove(tmp.Name())
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
 		}
-		os.Remove(tmpOutput)
 		return 0
 	}
 

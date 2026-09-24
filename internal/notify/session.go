@@ -65,6 +65,7 @@ type session struct {
 	d       Deps
 	id      uint32
 	gone    bool // server closed our notification; show no more UI
+	broken  bool // a Show failed or timed out; show no more UI
 	dead    bool // event stream ended
 	release func()
 }
@@ -75,7 +76,7 @@ func (s *session) run() error {
 		if err != nil {
 			return err
 		}
-		if s.d.Server == nil || s.gone || s.m.Linger <= 0 {
+		if !s.ui() || s.m.Linger <= 0 {
 			return nil
 		}
 		phase := PhaseDone
@@ -83,6 +84,10 @@ func (s *session) run() error {
 			phase = PhaseStopped
 		}
 		s.show(phase)
+		// Nothing on screen to linger for.
+		if !s.ui() || s.id == 0 {
+			return nil
+		}
 		if !s.linger() {
 			return nil
 		}
@@ -93,10 +98,12 @@ func (s *session) run() error {
 func (s *session) playOnce() (stopped bool, err error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	s.show(PhasePlaying)
 
+	// Start the audio first: a slow or wedged notification server must
+	// never delay playback (or the lock it holds).
 	done := make(chan error, 1)
 	go func() { done <- s.d.Play(ctx) }()
+	s.show(PhasePlaying)
 
 	for {
 		select {
@@ -155,7 +162,11 @@ func (s *session) linger() bool {
 				}
 				rel, err := s.d.Reacquire()
 				if err != nil {
-					// Another message is playing; stay in the lingering state.
+					// Another message is playing: say so and keep lingering.
+					s.show(PhaseBusy)
+					if !s.ui() {
+						return false
+					}
 					continue
 				}
 				s.release = rel
@@ -165,12 +176,18 @@ func (s *session) linger() bool {
 	}
 }
 
+// ui reports whether the notification may still be shown or updated.
+func (s *session) ui() bool { return s.d.Server != nil && !s.gone && !s.broken }
+
+// show creates or updates the notification. A failure (including a
+// timeout) means the server is unusable, so no further UI is attempted.
 func (s *session) show(p Phase) {
-	if s.d.Server == nil || s.gone {
+	if !s.ui() {
 		return
 	}
 	id, err := s.d.Server.Show(s.id, Build(s.m, p, s.d.Server.Markup()))
 	if err != nil {
+		s.broken = true
 		return
 	}
 	s.id = id

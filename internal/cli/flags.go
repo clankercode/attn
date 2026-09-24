@@ -455,9 +455,7 @@ func NotifySettings(cfg *ConfigFile) (enabled bool, linger time.Duration) {
 			enabled = *cfg.Notify.Enabled
 		}
 		if v := strings.TrimSpace(cfg.Notify.Linger); v != "" {
-			if v == "0" {
-				linger = 0
-			} else if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+			if d, err := time.ParseDuration(v); err == nil && d >= 0 {
 				linger = d
 			} else {
 				fmt.Fprintf(os.Stderr, "warning: ignoring invalid notify.linger %q\n", v)
@@ -467,8 +465,8 @@ func NotifySettings(cfg *ConfigFile) (enabled bool, linger time.Duration) {
 	if v := strings.TrimSpace(os.Getenv("ATTN_NOTIFY_LINGER")); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
 			linger = d
-		} else if v == "0" {
-			linger = 0
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: ignoring invalid ATTN_NOTIFY_LINGER %q\n", v)
 		}
 	}
 	if os.Getenv("ATTN_NO_NOTIFY") == "1" {

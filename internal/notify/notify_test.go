@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestBuildPlayingShowsFullEscapedTextAndStopCopy(t *testing.T) {
@@ -95,5 +96,48 @@ func TestWhereUsesRepoNameAndWorktree(t *testing.T) {
 	plain := filepath.Join(home, "scratch")
 	if p, _ := Where(plain); p != "scratch" {
 		t.Fatalf("non-repo dir: %q", p)
+	}
+}
+
+func TestBuildBusy(t *testing.T) {
+	s := Build(Meta{Text: "x", Project: "p"}, PhaseBusy, true)
+	if s.Summary != "p (busy, try Replay again)" || s.Actions[0] != ActionReplay || s.Actions[2] != ActionCopy {
+		t.Fatalf("busy = %+v", s)
+	}
+}
+
+func TestBuildSanitizesBodyWithAndWithoutMarkup(t *testing.T) {
+	in := "\x1b[31mred\x1b[0m\tok\r\nnext\x00\x07\x7f \ufffe\uffff<b>é\xff"
+	for _, markup := range []bool{false, true} {
+		got := Build(Meta{Text: in}, PhasePlaying, markup).Body
+		want := "[31mred[0m\tok\nnext <b>é\ufffd"
+		if markup {
+			want = "[31mred[0m\tok\nnext &lt;b&gt;é\ufffd"
+		}
+		if got != want {
+			t.Errorf("markup=%v: body = %q, want %q", markup, got, want)
+		}
+	}
+}
+
+func TestEncodeCapsTextAndKeepsHTML(t *testing.T) {
+	long := strings.Repeat("é", 20000) // 40000 bytes
+	enc := Meta{Text: long, Project: "a<b>&c"}.Encode()
+	if strings.Contains(enc, "\\u003c") || strings.HasSuffix(enc, "\n") {
+		t.Fatalf("encoding must not HTML-escape or end in a newline: %q", enc[:40])
+	}
+	m := DecodeMeta(enc)
+	if m.Project != "a<b>&c" {
+		t.Fatalf("project = %q", m.Project)
+	}
+	if len(m.Text) > maxEnvText || !strings.HasSuffix(m.Text, "…") || !utf8.ValidString(m.Text) {
+		t.Fatalf("text len=%d suffix=%q valid=%v", len(m.Text), m.Text[len(m.Text)-6:], utf8.ValidString(m.Text))
+	}
+	if !strings.HasPrefix(long, strings.TrimSuffix(m.Text, "…")) {
+		t.Fatal("truncated text must be a prefix of the original")
+	}
+	short := Meta{Text: "short"}
+	if DecodeMeta(short.Encode()) != short {
+		t.Fatal("short text must round-trip unchanged")
 	}
 }

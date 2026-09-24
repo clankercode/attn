@@ -33,8 +33,10 @@ var (
 	spawnDetachedPlayback = startDetachedPlayback
 	connectNotify         = notify.Connect
 	copyText              = notify.CopyText
-	reacquireLock         = func() (func(), error) {
-		lock, err := WaitForLock(30000)
+	// reacquireLock never waits: Replay while other audio plays reports
+	// busy on the notification instead of queueing.
+	reacquireLock = func() (func(), error) {
+		lock, err := AcquireLock()
 		if err != nil {
 			return nil, err
 		}
@@ -259,6 +261,9 @@ func HandleDetachedPlayback(args []string) (bool, error) {
 	meta := notify.DecodeMeta(os.Getenv(notify.MetaEnv))
 	os.Unsetenv(notify.MetaEnv)
 	os.Unsetenv(detachedPlaybackEnv)
+	// We may linger for a long time: don't pin the caller's directory (the
+	// audio path is absolute and the labels were computed by the parent).
+	_ = os.Chdir("/")
 
 	var once sync.Once
 	release := func() { once.Do(func() { lockFile.Close() }) }
@@ -293,6 +298,10 @@ func startDetachedPlayback(path string, lock *lockState, meta notify.Meta) error
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
 	}
+	// The child changes to / so it doesn't pin our cwd.
+	if path, err = filepath.Abs(path); err != nil {
+		return fmt.Errorf("resolve audio path: %w", err)
+	}
 
 	cmd := exec.Command(exe, path)
 	cmd.Env = append(os.Environ(), detachedPlaybackEnv+"=1", notify.MetaEnv+"="+meta.Encode())
@@ -301,6 +310,9 @@ func startDetachedPlayback(path string, lock *lockState, meta notify.Meta) error
 	// and a write to a pipe whose reader has exited would SIGPIPE it.
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Don't leak fds inherited from our caller into a long-lived child
+	// (ExtraFiles, i.e. the lock, are still passed).
+	closeInheritedFDsOnExec()
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start detached playback: %w", err)

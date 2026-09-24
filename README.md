@@ -83,7 +83,7 @@ the caller's directory as the origin. Alerts (`--alert`) use critical urgency.
 
 | While speaking | After playback (for `notify.linger`, default 15m) |
 |----------------|---------------------------------------------------|
-| **Stop**: stop this audio only; other `attn` commands are unaffected | **Replay**: play it again (queues behind any audio already playing) |
+| **Stop**: stop this audio only; other `attn` commands are unaffected | **Replay**: play it again if nothing else is playing; otherwise the notification says busy |
 | **Copy text**: copy the message to the clipboard (`wl-copy` / `xclip`) | **Copy text** |
 
 Dismissing the notification while it speaks keeps the audio going but ends the
@@ -91,6 +91,9 @@ notification. Once the linger window ends the notification closes itself; the
 message stays in `attn history`. The server's own notification sound is
 suppressed. `--fg` shows the notification while speaking, without the linger.
 If desktop notifications are unavailable, playback proceeds normally.
+
+Only one message plays at a time: while a message (or a replay) is speaking,
+new `attn` calls without `--wait` are skipped. The linger itself holds no lock.
 
 ### Dry Run
 

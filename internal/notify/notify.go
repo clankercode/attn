@@ -12,11 +12,16 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // MetaEnv carries the encoded Meta from the attn caller to the detached
 // playback child.
 const MetaEnv = "ATTN_NOTIFY_META"
+
+// maxEnvText caps Meta.Text in the encoded MetaEnv value, keeping it well
+// under the kernel's 128 KiB per-string limit (MAX_ARG_STRLEN) for exec.
+const maxEnvText = 16 << 10
 
 // DefaultLinger is how long the notification (and its Replay / Copy
 // buttons) stays live after playback ends.
@@ -45,13 +50,30 @@ type Meta struct {
 	Disabled bool `json:"disabled,omitempty"`
 }
 
-// Encode serialises m for MetaEnv.
+// Encode serialises m for MetaEnv, truncating very long text.
 func (m Meta) Encode() string {
-	b, err := json.Marshal(m)
-	if err != nil {
+	m.Text = truncate(m.Text, maxEnvText)
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(m); err != nil {
 		return ""
 	}
-	return string(b)
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// truncate shortens s to at most max bytes, cutting at a rune boundary and
+// marking the cut with an ellipsis.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	const ellipsis = "…"
+	cut := max - len(ellipsis)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + ellipsis
 }
 
 // DecodeMeta parses a MetaEnv value. An empty or invalid value yields a
@@ -71,6 +93,8 @@ const (
 	PhasePlaying Phase = iota
 	PhaseDone
 	PhaseStopped
+	// PhaseBusy is PhaseDone after a Replay found other audio playing.
+	PhaseBusy
 )
 
 // Spec is one fully-resolved org.freedesktop.Notifications.Notify call.
@@ -93,7 +117,7 @@ func Build(m Meta, p Phase, markup bool) Spec {
 	if project == "" {
 		project = "attn"
 	}
-	body := m.Text
+	body := sanitize(m.Text)
 	if markup {
 		body = EscapeMarkup(body)
 	}
@@ -122,11 +146,14 @@ func Build(m Meta, p Phase, markup bool) Spec {
 		s.Actions = []string{ActionStop, "Stop", ActionCopy, "Copy text"}
 		// Stay up while speaking so Stop is reachable; replaced at the end.
 		s.Timeout = 0
-	case PhaseDone, PhaseStopped:
+	case PhaseDone, PhaseStopped, PhaseBusy:
 		s.Icon = "dialog-information"
 		s.Summary = project
-		if p == PhaseStopped {
+		switch p {
+		case PhaseStopped:
 			s.Summary += " (stopped)"
+		case PhaseBusy:
+			s.Summary += " (busy, try Replay again)"
 		}
 		s.Actions = []string{ActionReplay, "Replay", ActionCopy, "Copy text"}
 		s.Timeout = -1
@@ -136,6 +163,21 @@ func Build(m Meta, p Phase, markup bool) Spec {
 		s.Summary = "⚠ " + s.Summary
 	}
 	return s
+}
+
+// sanitize drops characters that notification servers render badly or
+// reject: C0 controls other than newline and tab (e.g. ANSI escapes), DEL,
+// and the noncharacters U+FFFE / U+FFFF. Invalid UTF-8 becomes U+FFFD.
+func sanitize(text string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\t':
+			return r
+		case r < 0x20 || r == 0x7f || r == 0xfffe || r == 0xffff:
+			return -1
+		}
+		return r
+	}, text)
 }
 
 // EscapeMarkup escapes text for servers that parse the body as markup.

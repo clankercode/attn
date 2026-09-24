@@ -319,4 +319,12 @@ func TestNotifyLingerEnvOverride(t *testing.T) {
 	if _, linger := NotifySettings(&ConfigFile{Notify: NotifyConfig{Linger: "1h"}}); linger != 5*time.Second {
 		t.Fatalf("linger = %v, want 5s", linger)
 	}
+	t.Setenv("ATTN_NOTIFY_LINGER", "0")
+	if _, linger := NotifySettings(&ConfigFile{Notify: NotifyConfig{Linger: "1h"}}); linger != 0 {
+		t.Fatalf("linger = %v, want 0", linger)
+	}
+	t.Setenv("ATTN_NOTIFY_LINGER", "later")
+	if _, linger := NotifySettings(&ConfigFile{Notify: NotifyConfig{Linger: "1h"}}); linger != time.Hour {
+		t.Fatalf("invalid env must keep the config value; linger = %v", linger)
+	}
 }
