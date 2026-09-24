@@ -90,6 +90,11 @@ Dismissing the notification while it speaks keeps the audio going but ends the
 notification. Once the linger window ends the notification closes itself; the
 message stays in `attn history`. The server's own notification sound is
 suppressed. `--fg` shows the notification while speaking, without the linger.
+When attn runs inside a systemd unit (for example a `Type=oneshot` timer
+script), background playback moves into its own transient scope via
+`systemd-run --user --scope`, so systemd's end-of-unit cleanup doesn't cut the
+audio off or close the notification.
+
 If desktop notifications are unavailable, playback proceeds normally.
 Each lingering message is a small background `attn` process (~16 MB) holding
 its Replay / Copy buttons; a shorter `notify.linger` / `ATTN_NOTIFY_LINGER`

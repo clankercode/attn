@@ -368,18 +368,30 @@ func startDetachedPlayback(path string, lock *lockState, meta notify.Meta) error
 		return fmt.Errorf("resolve audio path: %w", err)
 	}
 
-	cmd := exec.Command(exe, path)
-	cmd.Env = append(os.Environ(), detachedPlaybackEnv+"=1", notify.MetaEnv+"="+meta.Encode())
-	cmd.ExtraFiles = []*os.File{lock.file}
-	// /dev/null, not pipes: the child outlives us (lingering notification),
-	// and a write to a pipe whose reader has exited would SIGPIPE it.
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	env := append(os.Environ(), detachedPlaybackEnv+"=1", notify.MetaEnv+"="+meta.Encode())
+	start := func(argv []string) (*exec.Cmd, error) {
+		cmd := exec.Command(argv[0], argv[1:]...)
+		cmd.Env = env
+		cmd.ExtraFiles = []*os.File{lock.file}
+		// /dev/null, not pipes: the child outlives us (lingering
+		// notification), and a write to a pipe whose reader has exited
+		// would SIGPIPE it.
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		return cmd, cmd.Start()
+	}
 	// Don't leak fds inherited from our caller into a long-lived child
 	// (ExtraFiles, i.e. the lock, are still passed).
 	closeInheritedFDsOnExec()
 
-	if err := cmd.Start(); err != nil {
+	argv := []string{exe, path}
+	if scoped := scopeArgv(argv); scoped != nil {
+		if cmd, err := start(scoped); err == nil && scopeStarted(cmd, scopeProbeWait) {
+			return nil
+		}
+		// No usable user manager: fall back to a plain child.
+	}
+	if _, err := start(argv); err != nil {
 		return fmt.Errorf("start detached playback: %w", err)
 	}
 	return nil
