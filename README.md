@@ -91,6 +91,9 @@ notification. Once the linger window ends the notification closes itself; the
 message stays in `attn history`. The server's own notification sound is
 suppressed. `--fg` shows the notification while speaking, without the linger.
 If desktop notifications are unavailable, playback proceeds normally.
+Each lingering message is a small background `attn` process (~16 MB) holding
+its Replay / Copy buttons; a shorter `notify.linger` / `ATTN_NOTIFY_LINGER`
+frees them sooner.
 
 Only one message plays at a time: while a message (or a replay) is speaking,
 new `attn` calls without `--wait` are skipped. The linger itself holds no lock.

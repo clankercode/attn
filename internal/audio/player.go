@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -37,6 +38,9 @@ var (
 	// busy on the notification instead of queueing.
 	reacquireLock = func() (func(), error) {
 		lock, err := AcquireLock()
+		if errors.Is(err, ErrAlreadyPlaying) {
+			return nil, notify.ErrBusy
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -277,20 +281,56 @@ func playDetached(path string, meta notify.Meta, release func()) error {
 	return runWithNotification(path, meta, release, reacquireLock)
 }
 
+// Interrupted is returned when a signal ended playback; the notification
+// has been closed by then.
+type Interrupted struct{ Signal syscall.Signal }
+
+func (e *Interrupted) Error() string { return "interrupted by " + e.Signal.String() }
+
+// ExitCode is the conventional shell status for the signal (e.g. 130).
+func (e *Interrupted) ExitCode() int { return 128 + int(e.Signal) }
+
+// runWithNotification plays path with its notification. SIGINT, SIGTERM and
+// SIGHUP stop playback and close the notification (instead of leaving it up
+// with dead buttons), then yield *Interrupted.
 func runWithNotification(path string, meta notify.Meta, release func(), reacquire func() (func(), error)) error {
-	var srv notify.Server
-	if !meta.Disabled {
-		if s, err := connectNotify(); err == nil {
-			srv = s
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	interrupted := make(chan struct{})
+	finished, watched := make(chan struct{}), make(chan struct{})
+	var sig os.Signal
+	go func() {
+		defer close(watched)
+		select {
+		case sig = <-sigs:
+			close(interrupted)
+		case <-finished:
 		}
-	}
-	return notify.Run(meta, notify.Deps{
-		Server:    srv,
+	}()
+
+	err := notify.Run(meta, notify.Deps{
+		Connect:   connectNotify,
 		Play:      func(ctx context.Context) error { return playFileFn(ctx, path) },
 		Release:   release,
 		Reacquire: reacquire,
 		Copy:      copyText,
+		Done:      interrupted,
 	})
+	signal.Stop(sigs)
+	close(finished)
+	<-watched
+	if sig == nil {
+		// A terminal Ctrl-C also kills the sink, so playback may have
+		// failed just before the signal reached the watcher.
+		select {
+		case sig = <-sigs:
+		default:
+		}
+	}
+	if s, ok := sig.(syscall.Signal); ok {
+		return &Interrupted{Signal: s}
+	}
+	return err
 }
 
 func startDetachedPlayback(path string, lock *lockState, meta notify.Meta) error {

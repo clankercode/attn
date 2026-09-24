@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/faiface/beep"
+
+	"github.com/clankercode/attn/internal/notify"
 )
 
 // fakeSink puts an executable shell script called name first on PATH. It
@@ -89,17 +91,15 @@ func TestPlayFileDirectStopsOnCancel(t *testing.T) {
 }
 
 func TestReacquireLockDoesNotWait(t *testing.T) {
-	originalLockDir := lockDir
-	lockDir = t.TempDir()
-	t.Cleanup(func() { lockDir = originalLockDir })
+	useTempLockDir(t)
 
 	held, err := AcquireLock()
 	if err != nil {
 		t.Fatalf("AcquireLock() error = %v", err)
 	}
 	start := time.Now()
-	if _, err := reacquireLock(); !errors.Is(err, ErrAlreadyPlaying) {
-		t.Fatalf("reacquireLock() error = %v, want ErrAlreadyPlaying", err)
+	if _, err := reacquireLock(); !errors.Is(err, notify.ErrBusy) {
+		t.Fatalf("reacquireLock() error = %v, want notify.ErrBusy", err)
 	}
 	if d := time.Since(start); d > 500*time.Millisecond {
 		t.Fatalf("reacquireLock blocked for %v", d)

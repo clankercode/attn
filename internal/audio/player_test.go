@@ -2,13 +2,26 @@ package audio
 
 import (
 	"context"
+	"encoding/binary"
+	"errors"
+	"os"
+	"path/filepath"
+	"sync"
+	"syscall"
+	"testing"
 	"time"
 
-	"encoding/binary"
 	"github.com/clankercode/attn/internal/notify"
-	"path/filepath"
-	"testing"
 )
+
+// useTempLockDir points the playback lock at a per-test directory, so tests
+// never touch (or wait on) the real /tmp/attn-tool lock.
+func useTempLockDir(t *testing.T) {
+	t.Helper()
+	original := lockDir
+	lockDir = t.TempDir()
+	t.Cleanup(func() { lockDir = original })
+}
 
 func TestPlaybackCommandForPipeWire(t *testing.T) {
 	name, args := playbackCommand("pw-play", 32000)
@@ -65,6 +78,7 @@ func TestSamplesToPCM16LE(t *testing.T) {
 }
 
 func TestPlayAndSaveBackgroundCallsDetachedSpawnerNotForeground(t *testing.T) {
+	useTempLockDir(t)
 	originalSpawn := spawnDetachedPlayback
 	originalPlay := playFileFn
 	spawnCalled := false
@@ -99,6 +113,7 @@ func TestPlayAndSaveBackgroundCallsDetachedSpawnerNotForeground(t *testing.T) {
 }
 
 func TestForegroundPlayAndSaveCallsForegroundPlayer(t *testing.T) {
+	useTempLockDir(t)
 	originalSpawn := spawnDetachedPlayback
 	originalPlay := playFileFn
 	foregroundCalled := false
@@ -137,12 +152,17 @@ type fakeServer struct {
 	shown   []notify.Spec
 	closed  []uint32
 	stopped bool
+	up      chan struct{} // closed by the first Show
+	upOnce  sync.Once
 }
 
-func newFakeServer() *fakeServer { return &fakeServer{events: make(chan notify.Event, 8)} }
+func newFakeServer() *fakeServer {
+	return &fakeServer{events: make(chan notify.Event, 8), up: make(chan struct{})}
+}
 
 func (f *fakeServer) Show(replaceID uint32, sp notify.Spec) (uint32, error) {
 	f.shown = append(f.shown, sp)
+	f.upOnce.Do(func() { close(f.up) })
 	id := replaceID
 	if id == 0 {
 		id = 7
@@ -190,12 +210,14 @@ func TestDetachedPlaybackStopCancelsOnlyPlayback(t *testing.T) {
 }
 
 func TestForegroundPlaybackShowsNotificationWithoutLinger(t *testing.T) {
+	useTempLockDir(t)
 	originalPlay, originalConnect := playFileFn, connectNotify
 	t.Cleanup(func() { playFileFn, connectNotify = originalPlay, originalConnect })
 
 	srv := newFakeServer()
 	connectNotify = func() (notify.Server, error) { return srv, nil }
-	playFileFn = func(ctx context.Context, path string) error { return nil }
+	// Finish once the notification is up (it connects alongside playback).
+	playFileFn = func(ctx context.Context, path string) error { <-srv.up; return nil }
 
 	outputPath := filepath.Join(t.TempDir(), "out.wav")
 	meta := notify.Meta{Text: "fg message", Linger: time.Hour}
@@ -207,6 +229,37 @@ func TestForegroundPlaybackShowsNotificationWithoutLinger(t *testing.T) {
 	}
 	if len(srv.closed) != 1 {
 		t.Fatalf("expected fg notification closed at playback end, got %v", srv.closed)
+	}
+}
+
+func TestSignalDuringPlaybackClosesNotification(t *testing.T) {
+	originalPlay, originalConnect := playFileFn, connectNotify
+	t.Cleanup(func() { playFileFn, connectNotify = originalPlay, originalConnect })
+
+	srv := newFakeServer()
+	connectNotify = func() (notify.Server, error) { return srv, nil }
+	var playErr error
+	playFileFn = func(ctx context.Context, path string) error {
+		<-srv.up
+		// Handled by runWithNotification, so this does not kill the test.
+		syscall.Kill(os.Getpid(), syscall.SIGTERM)
+		<-ctx.Done()
+		playErr = ctx.Err()
+		return playErr
+	}
+
+	released := 0
+	err := runWithNotification("sample.wav", notify.Meta{Text: "m", Linger: time.Hour},
+		func() { released++ }, reacquireLock)
+	var intr *Interrupted
+	if !errors.As(err, &intr) || intr.Signal != syscall.SIGTERM || intr.ExitCode() != 143 {
+		t.Fatalf("err = %v, want *Interrupted{SIGTERM} (exit 143)", err)
+	}
+	if !errors.Is(playErr, context.Canceled) || released != 1 {
+		t.Fatalf("playErr=%v released=%d", playErr, released)
+	}
+	if len(srv.shown) != 1 || len(srv.closed) != 1 || !srv.stopped {
+		t.Fatalf("shown=%d closed=%v stopped=%v (no linger; notification closed)", len(srv.shown), srv.closed, srv.stopped)
 	}
 }
 

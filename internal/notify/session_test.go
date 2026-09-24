@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -14,12 +15,17 @@ type fakeServer struct {
 	shown    []Spec
 	closed   []uint32
 	shutdown bool
+	up       chan struct{} // closed by the first Show
+	upOnce   sync.Once
 }
 
-func newFake() *fakeServer { return &fakeServer{events: make(chan Event, 16)} }
+func newFake() *fakeServer {
+	return &fakeServer{events: make(chan Event, 16), up: make(chan struct{})}
+}
 
 func (f *fakeServer) Show(replaceID uint32, s Spec) (uint32, error) {
 	f.shown = append(f.shown, s)
+	f.upOnce.Do(func() { close(f.up) })
 	id := replaceID
 	if id == 0 {
 		id = 42
@@ -52,6 +58,24 @@ func lingerNow(time.Duration) <-chan time.Time {
 
 func blockUntilCancel(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
 
+// serve is a Connect that returns srv at once.
+func serve(srv Server) func() (Server, error) {
+	return func() (Server, error) { return srv, nil }
+}
+
+// playShown is a Play that finishes (with err) once the notification is up:
+// Connect runs alongside Play, so an instant Play would race it.
+func (f *fakeServer) playShown(err error) func(context.Context) error {
+	return func(ctx context.Context) error {
+		select {
+		case <-f.up:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 func TestStopThenLingerTimeoutClosesNotification(t *testing.T) {
 	srv := newFake()
 	srv.onShow = func(id uint32, s Spec) {
@@ -62,7 +86,7 @@ func TestStopThenLingerTimeoutClosesNotification(t *testing.T) {
 	}
 	released := 0
 	err := Run(Meta{Text: "m", Project: "p", Linger: time.Minute}, Deps{
-		Server:  srv,
+		Connect: serve(srv),
 		Play:    blockUntilCancel,
 		Release: func() { released++ },
 		After:   lingerNow,
@@ -92,7 +116,7 @@ func TestCopyDuringPlaybackAndAfter(t *testing.T) {
 		}
 	}
 	err := Run(Meta{Text: "the full text", Linger: time.Minute}, Deps{
-		Server: srv, Play: blockUntilCancel, Release: func() {},
+		Connect: serve(srv), Play: blockUntilCancel, Release: func() {},
 		Copy:  func(s string) error { copied = append(copied, s); return nil },
 		After: lingerNever,
 	})
@@ -119,8 +143,8 @@ func TestReplayReacquiresLockAndPlaysAgain(t *testing.T) {
 	}
 	plays, reacquired, released := 0, 0, 0
 	err := Run(Meta{Text: "m", Linger: time.Minute}, Deps{
-		Server:  srv,
-		Play:    func(context.Context) error { plays++; return nil },
+		Connect: serve(srv),
+		Play:    func(ctx context.Context) error { plays++; return srv.playShown(nil)(ctx) },
 		Release: func() { released++ },
 		Reacquire: func() (func(), error) {
 			reacquired++
@@ -151,13 +175,13 @@ func TestReplayBusyShowsBusyAndKeepsLingering(t *testing.T) {
 	}
 	plays, attempts := 0, 0
 	err := Run(Meta{Text: "m", Project: "p", Linger: time.Minute}, Deps{
-		Server:  srv,
-		Play:    func(context.Context) error { plays++; return nil },
+		Connect: serve(srv),
+		Play:    func(ctx context.Context) error { plays++; return srv.playShown(nil)(ctx) },
 		Release: func() {},
 		Reacquire: func() (func(), error) {
 			attempts++
 			if attempts == 1 {
-				return nil, errors.New("busy")
+				return nil, ErrBusy
 			}
 			return func() {}, nil
 		},
@@ -200,7 +224,7 @@ func TestShowFailureStillPlaysAndDoesNotLinger(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(Meta{Text: "m", Linger: time.Hour}, Deps{
-			Server:  srv,
+			Connect: serve(srv),
 			Play:    func(context.Context) error { close(srv.playing); return nil },
 			Release: func() { released++ },
 			After:   lingerNever,
@@ -227,7 +251,7 @@ func TestDoneShowFailureClosesAndDoesNotLinger(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(Meta{Text: "m", Linger: time.Hour}, Deps{
-			Server: srv, Play: func(context.Context) error { return nil },
+			Connect: serve(srv), Play: srv.playShown(nil),
 			Release: func() {}, After: lingerNever,
 		})
 	}()
@@ -266,7 +290,7 @@ func TestDismissDuringPlaybackKeepsPlayingWithoutMoreUI(t *testing.T) {
 	played := false
 	go func() { time.Sleep(20 * time.Millisecond); close(finish) }()
 	err := Run(Meta{Text: "m", Linger: time.Minute}, Deps{
-		Server: srv,
+		Connect: serve(srv),
 		Play: func(ctx context.Context) error {
 			select {
 			case <-finish:
@@ -291,7 +315,7 @@ func TestPlayErrorIsReturnedAndNotificationClosed(t *testing.T) {
 	srv := newFake()
 	boom := errors.New("no sink")
 	err := Run(Meta{Text: "m", Linger: time.Minute}, Deps{
-		Server: srv, Play: func(context.Context) error { return boom }, Release: func() {},
+		Connect: serve(srv), Play: srv.playShown(boom), Release: func() {},
 		After: lingerNever,
 	})
 	if !errors.Is(err, boom) || len(srv.closed) != 1 {
@@ -310,7 +334,7 @@ func TestNoServerOrDisabledJustPlays(t *testing.T) {
 	} {
 		plays := 0
 		err := Run(tc.meta, Deps{
-			Server: tc.srv, Play: func(context.Context) error { plays++; return nil },
+			Connect: serve(tc.srv), Play: func(context.Context) error { plays++; return nil },
 			Release: func() {}, After: lingerNever,
 		})
 		if err != nil || plays != 1 {
@@ -328,7 +352,7 @@ func TestEventStreamEndingDoesNotSpin(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(Meta{Text: "m", Linger: time.Minute}, Deps{
-			Server: srv, Play: func(context.Context) error { time.Sleep(10 * time.Millisecond); return nil },
+			Connect: serve(srv), Play: func(context.Context) error { time.Sleep(10 * time.Millisecond); return nil },
 			Release: func() {}, After: lingerNever,
 		})
 	}()
@@ -341,3 +365,140 @@ func TestEventStreamEndingDoesNotSpin(t *testing.T) {
 		t.Fatal("Run hung after the event stream closed")
 	}
 }
+
+func TestReplayOtherErrorKeepsLingeringWithoutBusy(t *testing.T) {
+	srv := newFake()
+	srv.onShow = func(id uint32, s Spec) {
+		if len(srv.shown) == 2 { // done: Replay fails, then dismiss
+			srv.events <- Event{ID: id, Action: ActionReplay}
+			srv.events <- Event{ID: id, Closed: true}
+		}
+	}
+	plays := 0
+	err := Run(Meta{Text: "m", Project: "p", Linger: time.Minute}, Deps{
+		Connect:   serve(srv),
+		Play:      func(ctx context.Context) error { plays++; return srv.playShown(nil)(ctx) },
+		Reacquire: func() (func(), error) { return nil, errors.New("lock: permission denied") },
+		After:     lingerNever,
+	})
+	if err != nil || plays != 1 {
+		t.Fatalf("err=%v plays=%d", err, plays)
+	}
+	if got := srv.summaries(); strings.Join(got, "|") != "🔊 p|p" {
+		t.Fatalf("summaries = %q (a non-busy error must not claim busy)", got)
+	}
+}
+
+func TestDoneDuringPlayCancelsPlaybackAndCloses(t *testing.T) {
+	srv := newFake()
+	done := make(chan struct{})
+	srv.onShow = func(uint32, Spec) { close(done) } // signal while speaking
+	released := 0
+	var playErr error
+	err := Run(Meta{Text: "m", Linger: time.Minute}, Deps{
+		Connect: serve(srv),
+		Play:    func(ctx context.Context) error { playErr = blockUntilCancel(ctx); return playErr },
+		Release: func() { released++ },
+		Done:    done,
+		After:   lingerNever,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !errors.Is(playErr, context.Canceled) {
+		t.Fatalf("play not cancelled: %v", playErr)
+	}
+	if len(srv.shown) != 1 || released != 1 {
+		t.Fatalf("shown=%q released=%d (no linger after Done)", srv.summaries(), released)
+	}
+	if len(srv.closed) != 1 || srv.closed[0] != 42 || !srv.shutdown {
+		t.Fatalf("closed=%v shutdown=%v", srv.closed, srv.shutdown)
+	}
+}
+
+func TestDoneDuringLingerCloses(t *testing.T) {
+	srv := newFake()
+	done := make(chan struct{})
+	srv.onShow = func(id uint32, s Spec) {
+		if len(srv.shown) == 2 {
+			close(done)
+		}
+	}
+	finished := make(chan error, 1)
+	go func() {
+		finished <- Run(Meta{Text: "m", Linger: time.Hour}, Deps{
+			Connect: serve(srv), Play: srv.playShown(nil),
+			Done: done, After: lingerNever,
+		})
+	}()
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run kept lingering after Done")
+	}
+	if len(srv.closed) != 1 || srv.closed[0] != 42 || !srv.shutdown {
+		t.Fatalf("closed=%v shutdown=%v", srv.closed, srv.shutdown)
+	}
+}
+
+func TestSlowConnectDoesNotDelayPlayback(t *testing.T) {
+	srv := newFake()
+	started := make(chan struct{})
+	sawPlay := false
+	connect := func() (Server, error) {
+		select {
+		case <-started:
+			sawPlay = true
+		case <-time.After(2 * time.Second):
+		}
+		return srv, nil
+	}
+	err := Run(Meta{Text: "m"}, Deps{
+		Connect: connect,
+		Play: func(ctx context.Context) error {
+			close(started)
+			return srv.playShown(nil)(ctx)
+		},
+	})
+	if err != nil || !sawPlay {
+		t.Fatalf("err=%v sawPlay=%v (playback must start while connecting)", err, sawPlay)
+	}
+	if len(srv.shown) != 1 || len(srv.closed) != 1 {
+		t.Fatalf("shown=%d closed=%v", len(srv.shown), srv.closed)
+	}
+}
+
+func TestConnectStillPendingWhenPlaybackEnds(t *testing.T) {
+	srv := newFake()
+	unblock := make(chan struct{})
+	shutdown := make(chan struct{})
+	connect := func() (Server, error) {
+		<-unblock
+		return &shutdownServer{fakeServer: srv, shutdown: shutdown}, nil
+	}
+	start := time.Now()
+	err := Run(Meta{Text: "m"}, Deps{Connect: connect, Play: func(context.Context) error { return nil }})
+	if err != nil || time.Since(start) > time.Second {
+		t.Fatalf("err=%v after %v: Run must not wait for the server without linger", err, time.Since(start))
+	}
+	close(unblock)
+	select {
+	case <-shutdown:
+	case <-time.After(2 * time.Second):
+		t.Fatal("late server was never shut down")
+	}
+	if len(srv.shown) != 0 {
+		t.Fatalf("nothing may be shown after playback: %q", srv.summaries())
+	}
+}
+
+// shutdownServer reports Shutdown on a channel.
+type shutdownServer struct {
+	*fakeServer
+	shutdown chan struct{}
+}
+
+func (s *shutdownServer) Shutdown() { close(s.shutdown) }

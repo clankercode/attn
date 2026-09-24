@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,6 +27,9 @@ func Run(args []string) {
 
 func run(args []string) int {
 	if handled, err := audio.HandleDetachedPlayback(args); handled || err != nil {
+		if code, ok := interruptedCode(err); ok {
+			return code
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
@@ -133,6 +137,9 @@ func run(args []string) int {
 		if _, statErr := os.Stat(cfg.Output); statErr == nil {
 			recordHistory(cfg, spokenText, voice, finalAudio)
 		}
+		if code, ok := interruptedCode(err); ok {
+			return code
+		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
@@ -216,6 +223,16 @@ func adjustOutputExt(path string, pt tts.ProviderType) string {
 		return strings.TrimSuffix(path, ext) + want
 	}
 	return path
+}
+
+// interruptedCode maps a signal-ended playback to its conventional exit
+// status (130 for SIGINT, 143 for SIGTERM, 129 for SIGHUP).
+func interruptedCode(err error) (int, bool) {
+	var intr *audio.Interrupted
+	if errors.As(err, &intr) {
+		return intr.ExitCode(), true
+	}
+	return 0, false
 }
 
 // notificationMeta describes the playback notification: the full message as

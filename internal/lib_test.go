@@ -33,41 +33,52 @@ func TestRunDryRunDoesNotRequireAPIKey(t *testing.T) {
 	}
 }
 
+// TestDebugPlayFileBackgroundReturnsBeforeAudioFinishes runs the real binary:
+// the caller must return while the detached child is still playing. It
+// stays silent and private: a fake pw-play sink, a build-time temp lock dir
+// (never the real /tmp/attn-tool), and no desktop notification.
 func TestDebugPlayFileBackgroundReturnsBeforeAudioFinishes(t *testing.T) {
-	if os.Getenv("ATTN_DEBUG_PLAY_CHILD") == "1" {
-		Run([]string{"--debug-play-file", os.Getenv("ATTN_DEBUG_PLAY_FILE")})
-		return
+	if testing.Short() {
+		t.Skip("builds the attn binary")
+	}
+	dir := t.TempDir()
+	attnBin := filepath.Join(dir, "attn")
+	build := exec.Command("go", "build", "-p", "2",
+		"-ldflags", "-X github.com/clankercode/attn/internal/audio.lockDir="+filepath.Join(dir, "lock"),
+		"-o", attnBin, "github.com/clankercode/attn/cmd/attn")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Skipf("could not build attn: %v\n%s", err, out)
 	}
 
-	attnBin := "/tmp/attn-bg-test-bin"
-	cmdBuild := exec.Command("go", "build", "-o", attnBin, "./cmd/attn")
-	cmdBuild.Dir = "/home/xertrov/src/utils-attn"
-	buildOut, err := cmdBuild.CombinedOutput()
-	if err != nil {
-		t.Skipf("could not build attn: %v\n%s", err, buildOut)
+	// The sink "plays" for 2s, then records that it finished.
+	binDir := filepath.Join(dir, "bin")
+	sinkDone := filepath.Join(dir, "sink-done")
+	sink := "#!/bin/sh\nsleep 2\ncat >/dev/null\ntouch '" + sinkDone + "'\n"
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	defer os.Remove(attnBin)
+	if err := os.WriteFile(filepath.Join(binDir, "pw-play"), []byte(sink), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
-	tmpWav := "/tmp/attn-bg-test.wav"
-	defer os.Remove(tmpWav)
-
+	tmpWav := filepath.Join(dir, "in.wav")
 	if err := createSilentWav(tmpWav, 2*time.Second, 44100); err != nil {
 		t.Fatalf("createSilentWav: %v", err)
 	}
 
-	childEnv := append(os.Environ(), "ATTN_DEBUG_PLAY_CHILD=1", "ATTN_DEBUG_PLAY_FILE="+tmpWav)
 	cmd := exec.Command(attnBin, "--debug-play-file", tmpWav)
-	cmd.Env = childEnv
+	cmd.Env = append(os.Environ(),
+		"PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"TMPDIR="+dir,
+		"ATTN_NO_NOTIFY=1",
+	)
 
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start attn: %v", err)
 	}
-
 	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
+	go func() { done <- cmd.Wait() }()
 
 	select {
 	case err := <-done:
@@ -81,6 +92,19 @@ func TestDebugPlayFileBackgroundReturnsBeforeAudioFinishes(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		cmd.Process.Kill()
 		t.Fatal("attn did not return within 5s")
+	}
+
+	// The detached child must still play the file; wait so it doesn't
+	// outlive the test's temp dir.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(sinkDone); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("detached playback never finished")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
