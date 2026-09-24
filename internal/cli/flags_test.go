@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/clankercode/attn/internal/tts"
 )
@@ -282,5 +283,40 @@ func TestLoadConfigInvalidYAMLWarnsAndUsesEmptyDefaults(t *testing.T) {
 	cfg2 := LoadConfig()
 	if cfg2 != cfg {
 		t.Fatal("expected cached empty config")
+	}
+}
+
+func TestNotifySettings(t *testing.T) {
+	t.Setenv("ATTN_NO_NOTIFY", "")
+	t.Setenv("ATTN_NOTIFY_LINGER", "")
+	on, off := true, false
+	cases := []struct {
+		name    string
+		cfg     *ConfigFile
+		env     string
+		enabled bool
+		linger  time.Duration
+	}{
+		{"defaults", nil, "", true, 15 * time.Minute},
+		{"custom linger", &ConfigFile{Notify: NotifyConfig{Linger: "90s"}}, "", true, 90 * time.Second},
+		{"zero linger", &ConfigFile{Notify: NotifyConfig{Linger: "0"}}, "", true, 0},
+		{"invalid linger keeps default", &ConfigFile{Notify: NotifyConfig{Linger: "soon"}}, "", true, 15 * time.Minute},
+		{"disabled in config", &ConfigFile{Notify: NotifyConfig{Enabled: &off}}, "", false, 15 * time.Minute},
+		{"env overrides config", &ConfigFile{Notify: NotifyConfig{Enabled: &on}}, "1", false, 15 * time.Minute},
+	}
+	for _, tc := range cases {
+		t.Setenv("ATTN_NO_NOTIFY", tc.env)
+		enabled, linger := NotifySettings(tc.cfg)
+		if enabled != tc.enabled || linger != tc.linger {
+			t.Errorf("%s: got (%v, %v), want (%v, %v)", tc.name, enabled, linger, tc.enabled, tc.linger)
+		}
+	}
+}
+
+func TestNotifyLingerEnvOverride(t *testing.T) {
+	t.Setenv("ATTN_NO_NOTIFY", "")
+	t.Setenv("ATTN_NOTIFY_LINGER", "5s")
+	if _, linger := NotifySettings(&ConfigFile{Notify: NotifyConfig{Linger: "1h"}}); linger != 5*time.Second {
+		t.Fatalf("linger = %v, want 5s", linger)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/clankercode/attn/internal/audio"
 	"github.com/clankercode/attn/internal/cli"
 	"github.com/clankercode/attn/internal/history"
+	"github.com/clankercode/attn/internal/notify"
 	"github.com/clankercode/attn/internal/tts"
 )
 
@@ -56,7 +57,9 @@ func run(args []string) int {
 			return 1
 		}
 		tmpOutput := cfg.DebugPlayFile + ".attn-debug-tmp"
-		if err := audio.PlayAndSave(data, tmpOutput, true, false, false); err != nil {
+		meta := notificationMeta(cli.LoadConfig(), "debug: "+filepath.Base(cfg.DebugPlayFile), false)
+		meta.Linger = 0 // the temp copy is removed below, so Replay could not work
+		if err := audio.PlayAndSave(data, tmpOutput, true, false, false, meta); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
 		}
@@ -115,7 +118,8 @@ func run(args []string) int {
 		return 0
 	}
 
-	if err := audio.PlayAndSave(finalAudio, cfg.Output, true, cfg.Fg, cfg.Wait); err != nil {
+	meta := notificationMeta(fileCfg, cfg.Text, cfg.Alert)
+	if err := audio.PlayAndSave(finalAudio, cfg.Output, true, cfg.Fg, cfg.Wait, meta); err != nil {
 		// PlayAndSave writes the output file before playing, so a playback
 		// failure can leave a valid artifact on disk. Record it so the file
 		// is still browsable via `attn history`.
@@ -205,6 +209,22 @@ func adjustOutputExt(path string, pt tts.ProviderType) string {
 		return strings.TrimSuffix(path, ext) + want
 	}
 	return path
+}
+
+// notificationMeta describes the playback notification: the full message as
+// the caller wrote it, plus where it came from.
+func notificationMeta(fileCfg *cli.ConfigFile, text string, alert bool) notify.Meta {
+	enabled, linger := cli.NotifySettings(fileCfg)
+	cwd, _ := os.Getwd()
+	project, origin := notify.Where(cwd)
+	return notify.Meta{
+		Text:     text,
+		Project:  project,
+		Origin:   origin,
+		Alert:    alert,
+		Linger:   linger,
+		Disabled: !enabled,
+	}
 }
 
 // recordHistory appends the generation to the history log. Failures are

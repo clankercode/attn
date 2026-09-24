@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/clankercode/attn/internal/notify"
 	"github.com/clankercode/attn/internal/tts"
 	"gopkg.in/yaml.v3"
 )
@@ -28,6 +29,17 @@ type ConfigFile struct {
 	Minimax ProviderConfig `yaml:"minimax"`
 	Mimo    MimoConfig     `yaml:"mimo"`
 	Llmp    LlmpConfig     `yaml:"llmp"`
+
+	Notify NotifyConfig `yaml:"notify"`
+}
+
+// NotifyConfig controls the desktop notification shown during playback.
+type NotifyConfig struct {
+	// Enabled defaults to true when unset.
+	Enabled *bool `yaml:"enabled"`
+	// Linger is how long the notification keeps its Replay / Copy buttons
+	// after playback (Go duration, e.g. "15m"; "0" closes at playback end).
+	Linger string `yaml:"linger"`
 }
 
 // GlobalVoices are cross-provider defaults.
@@ -394,6 +406,9 @@ Defaults:
              explicit --provider / TTS_PROVIDER does not fall back)
   voice: random from preferred pool (minus banned), or fixed alert_voice for --alert
   output: ~/.tts-output/<unique timestamp>.mp3 (or .wav for groq/mimo)
+  notification: shows the full message with Stop / Copy text while speaking,
+           then Replay / Copy text for notify.linger (default 15m; ATTN_NOTIFY_LINGER overrides);
+           ATTN_NO_NOTIFY=1 to disable
   history: JSONL at $XDG_DATA_HOME/attn/history.jsonl (ATTN_NO_HISTORY=1 to disable)
            records text, provider, voice, cwd, and path; older entries without cwd still load
 
@@ -424,5 +439,40 @@ Config file (~/.config/attn/config.yaml):
     # base_url: https://omni-dyn-00.amaroolabs.com/v1   # LLMP_BASE_URL also works
     preferred: [eve, ara, leo]    # same Grok voice roster as grok
     alert_voice: rex
+  notify:
+    enabled: true                 # desktop notification during playback
+    linger: 15m                   # keep Replay / Copy text live after playback; 0 closes at end
 `)
+}
+
+// NotifySettings resolves whether to show the playback notification and how
+// long it lingers. ATTN_NOTIFY_LINGER and ATTN_NO_NOTIFY=1 override the
+// config file.
+func NotifySettings(cfg *ConfigFile) (enabled bool, linger time.Duration) {
+	enabled, linger = true, notify.DefaultLinger
+	if cfg != nil {
+		if cfg.Notify.Enabled != nil {
+			enabled = *cfg.Notify.Enabled
+		}
+		if v := strings.TrimSpace(cfg.Notify.Linger); v != "" {
+			if v == "0" {
+				linger = 0
+			} else if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+				linger = d
+			} else {
+				fmt.Fprintf(os.Stderr, "warning: ignoring invalid notify.linger %q\n", v)
+			}
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("ATTN_NOTIFY_LINGER")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+			linger = d
+		} else if v == "0" {
+			linger = 0
+		}
+	}
+	if os.Getenv("ATTN_NO_NOTIFY") == "1" {
+		enabled = false
+	}
+	return enabled, linger
 }

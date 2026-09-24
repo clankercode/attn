@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -11,11 +12,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/wav"
+
+	"github.com/clankercode/attn/internal/notify"
 )
 
 const (
@@ -23,12 +27,18 @@ const (
 	detachedPlaybackLockFD = 3
 )
 
+// Test seams.
 var (
-	playFileFn                = playFile
-	spawnDetachedPlayback     = startDetachedPlayback
-	startSilenceNotification  = startSilenceNotificationImpl
-	terminateDetachedPlayback = func() error {
-		return syscall.Kill(-os.Getpid(), syscall.SIGTERM)
+	playFileFn            = playFile
+	spawnDetachedPlayback = startDetachedPlayback
+	connectNotify         = notify.Connect
+	copyText              = notify.CopyText
+	reacquireLock         = func() (func(), error) {
+		lock, err := WaitForLock(30000)
+		if err != nil {
+			return nil, err
+		}
+		return func() { lock.Release() }, nil
 	}
 )
 
@@ -82,23 +92,26 @@ func Duration(data []byte) (string, error) {
 	return "", fmt.Errorf("could not determine audio duration")
 }
 
-func playFile(path string) error {
+func playFile(ctx context.Context, path string) error {
 	if sink, err := detectPCMSink(); err == nil {
-		if perr := playFilePCM(path, sink); perr == nil {
+		if perr := playFilePCM(ctx, path, sink); perr == nil {
 			return nil
+		} else if ctx.Err() != nil {
+			// Stopped by the user: don't fall back to another player.
+			return ctx.Err()
 		} else if fileSink, ferr := detectFileSink(); ferr == nil {
-			return playFileDirect(path, fileSink)
+			return playFileDirect(ctx, path, fileSink)
 		} else {
 			return perr
 		}
 	}
 	if fileSink, err := detectFileSink(); err == nil {
-		return playFileDirect(path, fileSink)
+		return playFileDirect(ctx, path, fileSink)
 	}
 	return fmt.Errorf("no supported playback program found (tried pw-play, pacat, paplay, ffplay, mpv)")
 }
 
-func playFilePCM(path, sink string) error {
+func playFilePCM(ctx context.Context, path, sink string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -111,15 +124,18 @@ func playFilePCM(path, sink string) error {
 	}
 	defer streamer.Close()
 
-	return streamToSink(streamer, format, sink)
+	return streamToSink(ctx, streamer, format, sink)
 }
 
-func playFileDirect(path, sink string) error {
+func playFileDirect(ctx context.Context, path, sink string) error {
 	name, args := fileSinkCommand(sink, path)
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return fmt.Errorf("run %s: %w", name, err)
 	}
 	return nil
@@ -186,9 +202,9 @@ func playbackCommand(sink string, sampleRate beep.SampleRate) (string, []string)
 	}
 }
 
-func streamToSink(streamer beep.Streamer, format beep.Format, sink string) error {
+func streamToSink(ctx context.Context, streamer beep.Streamer, format beep.Format, sink string) error {
 	name, args := playbackCommand(sink, format.SampleRate)
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(ctx, name, args...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("open playback stdin: %w", err)
@@ -201,9 +217,12 @@ func streamToSink(streamer beep.Streamer, format beep.Format, sink string) error
 		return fmt.Errorf("start %s: %w", name, err)
 	}
 
-	writeErr := streamPCM(streamer, stdin)
+	writeErr := streamPCM(ctx, streamer, stdin)
 	closeErr := stdin.Close()
 	waitErr := cmd.Wait()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 
 	if writeErr != nil {
 		return writeErr
@@ -229,36 +248,58 @@ func HandleDetachedPlayback(args []string) (bool, error) {
 	if lockFile == nil {
 		return true, fmt.Errorf("missing inherited playback lock")
 	}
-	defer lockFile.Close()
-
 	if _, err := lockFile.Stat(); err != nil {
 		return true, fmt.Errorf("invalid inherited playback lock: %w", err)
 	}
+	// The inherited lock fd is not close-on-exec. Without this, helpers we
+	// spawn (the clipboard daemon forked by wl-copy in particular) would
+	// hold the playback lock long after this process exits.
+	syscall.CloseOnExec(detachedPlaybackLockFD)
 
-	return true, playDetached(args[0])
+	meta := notify.DecodeMeta(os.Getenv(notify.MetaEnv))
+	os.Unsetenv(notify.MetaEnv)
+	os.Unsetenv(detachedPlaybackEnv)
+
+	var once sync.Once
+	release := func() { once.Do(func() { lockFile.Close() }) }
+	defer release()
+	return true, playDetached(args[0], meta, release)
 }
 
-func playDetached(path string) error {
-	stopNotification := startSilenceNotification(func() {
-		_ = terminateDetachedPlayback()
+// playDetached plays path with its notification, then keeps the
+// notification's Replay / Copy buttons live for meta.Linger.
+func playDetached(path string, meta notify.Meta, release func()) error {
+	return runWithNotification(path, meta, release, reacquireLock)
+}
+
+func runWithNotification(path string, meta notify.Meta, release func(), reacquire func() (func(), error)) error {
+	var srv notify.Server
+	if !meta.Disabled {
+		if s, err := connectNotify(); err == nil {
+			srv = s
+		}
+	}
+	return notify.Run(meta, notify.Deps{
+		Server:    srv,
+		Play:      func(ctx context.Context) error { return playFileFn(ctx, path) },
+		Release:   release,
+		Reacquire: reacquire,
+		Copy:      copyText,
 	})
-	defer stopNotification()
-
-	return playFileFn(path)
 }
 
-func startDetachedPlayback(path string, lock *lockState) error {
+func startDetachedPlayback(path string, lock *lockState, meta notify.Meta) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable: %w", err)
 	}
 
 	cmd := exec.Command(exe, path)
-	cmd.Env = append(os.Environ(), detachedPlaybackEnv+"=1")
+	cmd.Env = append(os.Environ(), detachedPlaybackEnv+"=1", notify.MetaEnv+"="+meta.Encode())
 	cmd.ExtraFiles = []*os.File{lock.file}
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	// /dev/null, not pipes: the child outlives us (lingering notification),
+	// and a write to a pipe whose reader has exited would SIGPIPE it.
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
@@ -267,9 +308,12 @@ func startDetachedPlayback(path string, lock *lockState) error {
 	return nil
 }
 
-func streamPCM(streamer beep.Streamer, w io.Writer) error {
+func streamPCM(ctx context.Context, streamer beep.Streamer, w io.Writer) error {
 	buf := make([][2]float64, 2048)
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		n, ok := streamer.Stream(buf)
 		if n > 0 {
 			if _, err := w.Write(samplesToPCM16LE(buf[:n])); err != nil {
@@ -301,7 +345,9 @@ func pcm16(v float64) int16 {
 	return int16(math.Round(v * 32767))
 }
 
-func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLock bool) error {
+// PlayAndSave writes data to outputPath and, when doPlay, plays it with a
+// desktop notification described by meta.
+func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLock bool, meta notify.Meta) error {
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}
@@ -344,9 +390,11 @@ func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLo
 		}
 
 		if fg {
-			return playFileFn(outputPath)
+			// The caller is waiting on us, so no lingering after playback.
+			meta.Linger = 0
+			return runWithNotification(outputPath, meta, nil, nil)
 		}
-		return spawnDetachedPlayback(outputPath, lock)
+		return spawnDetachedPlayback(outputPath, lock, meta)
 	}
 	return nil
 }
@@ -369,7 +417,7 @@ func FormatBytes(n int) string {
 }
 
 func Play(path string) error {
-	return playFile(path)
+	return playFile(context.Background(), path)
 }
 
 func SuggestPlayback(path string) string {

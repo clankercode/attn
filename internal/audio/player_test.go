@@ -1,7 +1,11 @@
 package audio
 
 import (
+	"context"
+	"time"
+
 	"encoding/binary"
+	"github.com/clankercode/attn/internal/notify"
 	"path/filepath"
 	"testing"
 )
@@ -65,7 +69,7 @@ func TestPlayAndSaveBackgroundCallsDetachedSpawnerNotForeground(t *testing.T) {
 	originalPlay := playFileFn
 	spawnCalled := false
 
-	spawnDetachedPlayback = func(path string, lock *lockState) error {
+	spawnDetachedPlayback = func(path string, lock *lockState, meta notify.Meta) error {
 		spawnCalled = true
 		if path == "" {
 			t.Fatal("expected non-empty path")
@@ -75,7 +79,7 @@ func TestPlayAndSaveBackgroundCallsDetachedSpawnerNotForeground(t *testing.T) {
 		}
 		return nil
 	}
-	playFileFn = func(path string) error {
+	playFileFn = func(ctx context.Context, path string) error {
 		t.Fatalf("foreground playFile should not be called for bg mode: %s", path)
 		return nil
 	}
@@ -85,7 +89,7 @@ func TestPlayAndSaveBackgroundCallsDetachedSpawnerNotForeground(t *testing.T) {
 	})
 
 	outputPath := filepath.Join(t.TempDir(), "sample.wav")
-	err := PlayAndSave(testWAVData(), outputPath, true, false, false)
+	err := PlayAndSave(testWAVData(), outputPath, true, false, false, notify.Meta{Disabled: true})
 	if err != nil {
 		t.Fatalf("PlayAndSave() error = %v", err)
 	}
@@ -99,11 +103,11 @@ func TestForegroundPlayAndSaveCallsForegroundPlayer(t *testing.T) {
 	originalPlay := playFileFn
 	foregroundCalled := false
 
-	spawnDetachedPlayback = func(path string, lock *lockState) error {
+	spawnDetachedPlayback = func(path string, lock *lockState, meta notify.Meta) error {
 		t.Fatalf("detached spawner should not be called for fg mode: %s", path)
 		return nil
 	}
-	playFileFn = func(path string) error {
+	playFileFn = func(ctx context.Context, path string) error {
 		foregroundCalled = true
 		if path == "" {
 			t.Fatal("expected non-empty path")
@@ -116,7 +120,7 @@ func TestForegroundPlayAndSaveCallsForegroundPlayer(t *testing.T) {
 	})
 
 	outputPath := filepath.Join(t.TempDir(), "sample.wav")
-	err := PlayAndSave(testWAVData(), outputPath, true, true, false)
+	err := PlayAndSave(testWAVData(), outputPath, true, true, false, notify.Meta{Disabled: true})
 	if err != nil {
 		t.Fatalf("PlayAndSave() error = %v", err)
 	}
@@ -125,45 +129,84 @@ func TestForegroundPlayAndSaveCallsForegroundPlayer(t *testing.T) {
 	}
 }
 
-func TestDetachedPlaybackSilenceActionTerminatesPlaybackGroup(t *testing.T) {
-	originalPlay := playFileFn
-	originalNotifier := startSilenceNotification
-	originalTerminate := terminateDetachedPlayback
+// fakeServer is a minimal notify.Server that invokes an action as soon as
+// a notification with that action is shown.
+type fakeServer struct {
+	events  chan notify.Event
+	onShow  func(id uint32, sp notify.Spec)
+	shown   []notify.Spec
+	closed  []uint32
+	stopped bool
+}
 
-	var action func()
-	notificationStopped := false
-	terminated := false
-	playFileFn = func(path string) error {
-		if action == nil {
-			t.Fatal("expected detached playback to start a silence notification")
-		}
-		action()
-		return nil
-	}
-	startSilenceNotification = func(onSilence func()) func() {
-		action = onSilence
-		return func() {
-			notificationStopped = true
-		}
-	}
-	terminateDetachedPlayback = func() error {
-		terminated = true
-		return nil
-	}
-	t.Cleanup(func() {
-		playFileFn = originalPlay
-		startSilenceNotification = originalNotifier
-		terminateDetachedPlayback = originalTerminate
-	})
+func newFakeServer() *fakeServer { return &fakeServer{events: make(chan notify.Event, 8)} }
 
-	if err := playDetached("sample.wav"); err != nil {
+func (f *fakeServer) Show(replaceID uint32, sp notify.Spec) (uint32, error) {
+	f.shown = append(f.shown, sp)
+	id := replaceID
+	if id == 0 {
+		id = 7
+	}
+	if f.onShow != nil {
+		f.onShow(id, sp)
+	}
+	return id, nil
+}
+func (f *fakeServer) Close(id uint32)             { f.closed = append(f.closed, id) }
+func (f *fakeServer) Events() <-chan notify.Event { return f.events }
+func (f *fakeServer) Markup() bool                { return true }
+func (f *fakeServer) Shutdown()                   { f.stopped = true }
+
+func TestDetachedPlaybackStopCancelsOnlyPlayback(t *testing.T) {
+	originalPlay, originalConnect := playFileFn, connectNotify
+	t.Cleanup(func() { playFileFn, connectNotify = originalPlay, originalConnect })
+
+	srv := newFakeServer()
+	srv.onShow = func(id uint32, sp notify.Spec) {
+		if len(srv.shown) == 1 {
+			srv.events <- notify.Event{ID: id, Action: notify.ActionStop}
+		}
+	}
+	connectNotify = func() (notify.Server, error) { return srv, nil }
+	playFileFn = func(ctx context.Context, path string) error {
+		<-ctx.Done() // plays until Stop cancels it
+		return ctx.Err()
+	}
+
+	released := 0
+	meta := notify.Meta{Text: "hello <world>", Linger: 0}
+	if err := playDetached("sample.wav", meta, func() { released++ }); err != nil {
 		t.Fatalf("playDetached() error = %v", err)
 	}
-	if !terminated {
-		t.Fatal("expected Silence action to terminate the detached playback group")
+	if released != 1 {
+		t.Fatalf("expected lock released once, got %d", released)
 	}
-	if !notificationStopped {
-		t.Fatal("expected notification to close when detached playback ends")
+	if got := srv.shown[0].Body; got != "hello &lt;world&gt;" {
+		t.Fatalf("expected escaped full text in body, got %q", got)
+	}
+	if len(srv.closed) != 1 || !srv.stopped {
+		t.Fatalf("expected notification closed and server shut down, closed=%v stopped=%v", srv.closed, srv.stopped)
+	}
+}
+
+func TestForegroundPlaybackShowsNotificationWithoutLinger(t *testing.T) {
+	originalPlay, originalConnect := playFileFn, connectNotify
+	t.Cleanup(func() { playFileFn, connectNotify = originalPlay, originalConnect })
+
+	srv := newFakeServer()
+	connectNotify = func() (notify.Server, error) { return srv, nil }
+	playFileFn = func(ctx context.Context, path string) error { return nil }
+
+	outputPath := filepath.Join(t.TempDir(), "out.wav")
+	meta := notify.Meta{Text: "fg message", Linger: time.Hour}
+	if err := PlayAndSave(testWAVData(), outputPath, true, true, false, meta); err != nil {
+		t.Fatalf("PlayAndSave() error = %v", err)
+	}
+	if len(srv.shown) != 1 || srv.shown[0].Body != "fg message" {
+		t.Fatalf("expected one playing notification with the message, got %+v", srv.shown)
+	}
+	if len(srv.closed) != 1 {
+		t.Fatalf("expected fg notification closed at playback end, got %v", srv.closed)
 	}
 }
 

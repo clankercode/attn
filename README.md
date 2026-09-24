@@ -7,7 +7,7 @@ A lightweight CLI tool for text-to-speech audio generation and playback with sup
 - **Multiple TTS Providers**: Support for Groq, Grok (xAI), Minimax, and MiMo APIs
 - **Local Playback**: Direct audio playback via PipeWire or system audio
 - **Background Playback**: Non-blocking audio output (by default)
-- **Silence Action**: Linux background playback shows a desktop notification with a Silence button
+- **Desktop Notification**: On Linux, playback shows the full message, where it came from, and Stop / Replay / Copy text buttons
 - **Alert Mode**: Generate attention-grabbing audio notifications
 - **Dry Run**: Generate audio without requiring API keys (useful for testing)
 - **Cross-Platform**: Works on Linux, macOS, and Windows
@@ -74,12 +74,23 @@ By default, audio plays in the background. To wait for playback to complete:
 attn --foreground "Wait for this to finish"
 ```
 
-### Silence Background Playback
+### Playback Notification
 
-On Linux desktops with a notification daemon, background playback shows an
-`attn is playing` notification. Click **Silence** to stop that audio without
-affecting other `attn` commands. If desktop notifications are unavailable,
-playback proceeds normally.
+On Linux desktops with a notification daemon, playback shows a notification
+with the **full message** as the body and the calling project (git repo name,
+plus the worktree name when inside `.worktrees/`) as the title. KDE also shows
+the caller's directory as the origin. Alerts (`--alert`) use critical urgency.
+
+| While speaking | After playback (for `notify.linger`, default 15m) |
+|----------------|---------------------------------------------------|
+| **Stop**: stop this audio only; other `attn` commands are unaffected | **Replay**: play it again (queues behind any audio already playing) |
+| **Copy text**: copy the message to the clipboard (`wl-copy` / `xclip`) | **Copy text** |
+
+Dismissing the notification while it speaks keeps the audio going but ends the
+notification. Once the linger window ends the notification closes itself; the
+message stays in `attn history`. The server's own notification sound is
+suppressed. `--fg` shows the notification while speaking, without the linger.
+If desktop notifications are unavailable, playback proceeds normally.
 
 ### Dry Run
 
@@ -156,6 +167,10 @@ mimo:
   # base_url: "https://..."            # optional
   preferred: [mimo_default]
   alert_voice: mimo_default
+
+notify:
+  enabled: true      # desktop notification during playback (ATTN_NO_NOTIFY=1 disables)
+  linger: 15m        # keep Replay / Copy text live after playback; 0 closes at playback end
 ```
 
 **Selection rules**
@@ -190,6 +205,8 @@ attn --dry-run "hello"
 - `MIMO_API_KEY`: API key for MiMo TTS provider
 - `TTS_PROVIDER`: default provider (`llmp-grok`, `minimax`, `groq`, `grok`, or `mimo`)
 - `GROK_TTS_LANGUAGE` / `XAI_TTS_LANGUAGE`: BCP-47 language for Grok TTS — both `grok` and `llmp-grok` (default `en`)
+- `ATTN_NO_NOTIFY=1`: disable the playback notification
+- `ATTN_NOTIFY_LINGER`: override `notify.linger` (Go duration, e.g. `2m`; `0` closes at playback end)
 
 Environment variables override keys from the config file when both are set.
 
