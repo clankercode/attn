@@ -141,7 +141,7 @@ func playFileDirect(ctx context.Context, path, sink string) error {
 	cmd.WaitDelay = time.Second
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Run(); err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -231,6 +231,10 @@ func streamToSink(ctx context.Context, streamer beep.Streamer, format beep.Forma
 	writeErr := streamPCM(ctx, streamer, stdin)
 	closeErr := stdin.Close()
 	waitErr := cmd.Wait()
+	if errors.Is(waitErr, exec.ErrWaitDelay) {
+		// The sink exited cleanly; only a leftover helper held its pipes.
+		waitErr = nil
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

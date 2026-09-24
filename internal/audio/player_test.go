@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -283,16 +286,38 @@ func testWAVData() []byte {
 	}
 }
 
+// TestInterruptSignalsSkipsInheritedIgnores re-runs itself under
+// `trap ” HUP` (what nohup does) so the ignore is inherited at startup, as
+// in real use, without leaking ignored signals into this test binary.
 func TestInterruptSignalsSkipsInheritedIgnores(t *testing.T) {
-	signal.Ignore(syscall.SIGHUP)
-	t.Cleanup(func() { signal.Reset(syscall.SIGHUP) })
-
-	for _, s := range interruptSignals() {
-		if s == syscall.SIGHUP {
-			t.Fatal("ignored SIGHUP must not be caught (would un-ignore it under nohup)")
+	if os.Getenv("ATTN_TEST_SIGHUP_IGNORED") == "1" {
+		for _, s := range interruptSignals() {
+			if s == syscall.SIGHUP {
+				fmt.Println("CAUGHT_SIGHUP")
+				os.Exit(1)
+			}
 		}
+		fmt.Println("SIGHUP_SKIPPED")
+		os.Exit(0)
 	}
-	if got := interruptSignals(); len(got) != 2 {
-		t.Fatalf("expected SIGINT and SIGTERM, got %v", got)
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	cmd := exec.Command("sh", "-c",
+		`trap '' HUP; exec "$0" -test.run='^TestInterruptSignalsSkipsInheritedIgnores$'`, os.Args[0])
+	cmd.Env = append(os.Environ(), "ATTN_TEST_SIGHUP_IGNORED=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "SIGHUP_SKIPPED") {
+		t.Fatalf("ignored SIGHUP must not be caught (nohup): err=%v output=%s", err, out)
+	}
+
+	if !signal.Ignored(syscall.SIGHUP) {
+		found := false
+		for _, s := range interruptSignals() {
+			found = found || s == syscall.SIGHUP
+		}
+		if !found {
+			t.Fatal("SIGHUP should be caught when not ignored")
+		}
 	}
 }
