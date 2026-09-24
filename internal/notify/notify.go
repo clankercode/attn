@@ -1,6 +1,6 @@
 // Package notify shows the desktop notification that accompanies attn
 // playback: the full message, the project it came from, and reaction
-// buttons (Stop / Replay / Copy text).
+// buttons (Stop while speaking; Replay / Close / Copy text after).
 //
 // Everything is best-effort: a missing session bus or notification server
 // disables the UI but never fails playback.
@@ -23,16 +23,27 @@ const MetaEnv = "ATTN_NOTIFY_META"
 // under the kernel's 128 KiB per-string limit (MAX_ARG_STRLEN) for exec.
 const maxEnvText = 16 << 10
 
-// DefaultLinger is how long the notification (and its Replay / Copy
-// buttons) stays live after playback ends.
+// DefaultLinger is how long the notification (and its Replay / Close /
+// Copy text buttons) stays live after playback ends.
 const DefaultLinger = 15 * time.Minute
 
 // Action keys used in Notify actions and ActionInvoked signals.
 const (
 	ActionStop   = "stop"
 	ActionReplay = "replay"
+	ActionClose  = "close"
 	ActionCopy   = "copy"
 )
+
+// lingerActions is the button row after playback, including after Stop:
+// Replay, Close, Copy text.
+func lingerActions() []string {
+	return []string{
+		ActionReplay, "Replay",
+		ActionClose, "Close",
+		ActionCopy, "Copy text",
+	}
+}
 
 // Meta describes one attn message for the notification.
 type Meta struct {
@@ -155,7 +166,7 @@ func Build(m Meta, p Phase, markup bool) Spec {
 		case PhaseBusy:
 			s.Summary += " (busy, try Replay again)"
 		}
-		s.Actions = []string{ActionReplay, "Replay", ActionCopy, "Copy text"}
+		s.Actions = lingerActions()
 		s.Timeout = -1
 	}
 	if m.Alert {

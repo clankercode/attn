@@ -195,8 +195,81 @@ func TestReplayBusyShowsBusyAndKeepsLingering(t *testing.T) {
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("summaries = %q, want %q", got, want)
 	}
-	if busy := srv.shown[2]; busy.Actions[0] != ActionReplay || busy.Actions[2] != ActionCopy {
+	if busy := srv.shown[2]; strings.Join(busy.Actions, ",") != strings.Join(lingerActions(), ",") {
 		t.Fatalf("busy actions = %v", busy.Actions)
+	}
+}
+
+func TestCloseDuringLingerEndsSession(t *testing.T) {
+	srv := newFake()
+	srv.onShow = func(id uint32, s Spec) {
+		if len(srv.shown) == 2 {
+			srv.events <- Event{ID: id, Action: ActionClose}
+		}
+	}
+	finished := make(chan error, 1)
+	go func() {
+		finished <- Run(Meta{Text: "m", Project: "p", Linger: time.Hour}, Deps{
+			Connect: serve(srv),
+			Play:    srv.playShown(nil),
+			Release: func() {},
+			After:   lingerNever,
+		})
+	}()
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close must end the linger instead of waiting out the timer")
+	}
+	if len(srv.shown) != 2 || srv.shown[1].Summary != "p" {
+		t.Fatalf("summaries = %v", srv.summaries())
+	}
+	if strings.Join(srv.shown[1].Actions, ",") != strings.Join(lingerActions(), ",") {
+		t.Fatalf("linger actions = %v", srv.shown[1].Actions)
+	}
+	if len(srv.closed) != 1 || srv.closed[0] != 42 || !srv.shutdown {
+		t.Fatalf("closed=%v shutdown=%v", srv.closed, srv.shutdown)
+	}
+}
+
+func TestCloseAfterStopEndsSession(t *testing.T) {
+	srv := newFake()
+	srv.onShow = func(id uint32, s Spec) {
+		switch len(srv.shown) {
+		case 1:
+			srv.events <- Event{ID: id, Action: ActionStop}
+		case 2:
+			srv.events <- Event{ID: id, Action: ActionClose}
+		}
+	}
+	finished := make(chan error, 1)
+	go func() {
+		finished <- Run(Meta{Text: "m", Project: "p", Linger: time.Hour}, Deps{
+			Connect: serve(srv),
+			Play:    blockUntilCancel,
+			Release: func() {},
+			After:   lingerNever,
+		})
+	}()
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close after Stop must end the linger")
+	}
+	if got := srv.summaries(); len(got) != 2 || got[1] != "p (stopped)" {
+		t.Fatalf("summaries = %v", got)
+	}
+	if strings.Join(srv.shown[1].Actions, ",") != strings.Join(lingerActions(), ",") {
+		t.Fatalf("stopped actions = %v", srv.shown[1].Actions)
+	}
+	if len(srv.closed) != 1 || !srv.shutdown {
+		t.Fatalf("closed=%v shutdown=%v", srv.closed, srv.shutdown)
 	}
 }
 

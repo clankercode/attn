@@ -285,7 +285,7 @@ func HandleDetachedPlayback(args []string) (bool, error) {
 }
 
 // playDetached plays path with its notification, then keeps the
-// notification's Replay / Copy buttons live for meta.Linger.
+// notification's Replay / Close / Copy text buttons live for meta.Linger.
 func playDetached(path string, meta notify.Meta, release func()) error {
 	return runWithNotification(path, meta, release, reacquireLock)
 }

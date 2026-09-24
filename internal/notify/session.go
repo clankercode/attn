@@ -57,8 +57,8 @@ type Deps struct {
 }
 
 // Run plays the message with its notification: Stop / Copy while speaking,
-// then Replay / Copy for m.Linger before closing it. Playback errors are
-// returned; a user Stop or Done is not an error.
+// then Replay / Close / Copy text for m.Linger before closing it. Playback
+// errors are returned; a user Stop, Close, or Done is not an error.
 func Run(m Meta, d Deps) error {
 	s := &session{m: m, d: d, release: d.Release}
 	if s.d.After == nil {
@@ -201,7 +201,7 @@ func (s *session) playOnce() (stopped bool, err error) {
 	}
 }
 
-// linger waits for Replay (true) or for dismissal / timeout / Done (false).
+// linger waits for Replay (true) or for Close / dismissal / timeout / Done (false).
 func (s *session) linger() bool {
 	timeout := s.d.After(s.m.Linger)
 	for {
@@ -224,6 +224,8 @@ func (s *session) linger() bool {
 				return false
 			case ev.Action == ActionCopy:
 				s.copy()
+			case ev.Action == ActionClose:
+				return false
 			case ev.Action == ActionReplay:
 				if s.d.Reacquire == nil {
 					continue

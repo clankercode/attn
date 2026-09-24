@@ -37,7 +37,7 @@ type ConfigFile struct {
 type NotifyConfig struct {
 	// Enabled defaults to true when unset.
 	Enabled *bool `yaml:"enabled"`
-	// Linger is how long the notification keeps its Replay / Copy buttons
+	// Linger is how long the notification keeps its Replay / Close / Copy buttons
 	// after playback (Go duration, e.g. "15m"; "0" closes at playback end).
 	Linger string `yaml:"linger"`
 }
@@ -407,7 +407,7 @@ Defaults:
   voice: random from preferred pool (minus banned), or fixed alert_voice for --alert
   output: ~/.tts-output/<unique timestamp>.mp3 (or .wav for groq/mimo)
   notification: shows the full message with Stop / Copy text while speaking,
-           then Replay / Copy text for notify.linger (default 15m; ATTN_NOTIFY_LINGER overrides);
+           then Replay / Close / Copy text for notify.linger (default 15m; ATTN_NOTIFY_LINGER overrides);
            ATTN_NO_NOTIFY=1 to disable
   history: JSONL at $XDG_DATA_HOME/attn/history.jsonl (ATTN_NO_HISTORY=1 to disable)
            records text, provider, voice, cwd, and path; older entries without cwd still load
@@ -441,7 +441,7 @@ Config file (~/.config/attn/config.yaml):
     alert_voice: rex
   notify:
     enabled: true                 # desktop notification during playback
-    linger: 15m                   # keep Replay / Copy text live after playback; 0 closes at end
+    linger: 15m                   # keep Replay / Close / Copy text live after playback; 0 closes at end
 `)
 }
 

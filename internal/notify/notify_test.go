@@ -45,13 +45,14 @@ func TestBuildNoMarkupLeavesTextRaw(t *testing.T) {
 }
 
 func TestBuildDoneStoppedAndAlert(t *testing.T) {
+	want := []string{ActionReplay, "Replay", ActionClose, "Close", ActionCopy, "Copy text"}
 	done := Build(Meta{Text: "x", Project: "p"}, PhaseDone, true)
-	if done.Summary != "p" || done.Actions[0] != ActionReplay || done.Timeout != -1 {
+	if done.Summary != "p" || done.Timeout != -1 || strings.Join(done.Actions, ",") != strings.Join(want, ",") {
 		t.Fatalf("done = %+v", done)
 	}
 	stopped := Build(Meta{Text: "x", Project: "p"}, PhaseStopped, true)
-	if stopped.Summary != "p (stopped)" {
-		t.Fatalf("stopped summary = %q", stopped.Summary)
+	if stopped.Summary != "p (stopped)" || strings.Join(stopped.Actions, ",") != strings.Join(want, ",") {
+		t.Fatalf("stopped = %+v", stopped)
 	}
 	alert := Build(Meta{Text: "x", Project: "p", Alert: true}, PhasePlaying, true)
 	if alert.Hints["urgency"] != byte(2) || !strings.HasPrefix(alert.Summary, "⚠ ") || alert.Icon != "dialog-warning" {
@@ -101,7 +102,8 @@ func TestWhereUsesRepoNameAndWorktree(t *testing.T) {
 
 func TestBuildBusy(t *testing.T) {
 	s := Build(Meta{Text: "x", Project: "p"}, PhaseBusy, true)
-	if s.Summary != "p (busy, try Replay again)" || s.Actions[0] != ActionReplay || s.Actions[2] != ActionCopy {
+	want := []string{ActionReplay, "Replay", ActionClose, "Close", ActionCopy, "Copy text"}
+	if s.Summary != "p (busy, try Replay again)" || strings.Join(s.Actions, ",") != strings.Join(want, ",") {
 		t.Fatalf("busy = %+v", s)
 	}
 }
