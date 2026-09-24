@@ -71,7 +71,7 @@ attn --provider minimax "Using Minimax API"
 By default, audio plays in the background. To wait for playback to complete:
 
 ```bash
-attn --foreground "Wait for this to finish"
+attn --fg "Wait for this to finish"
 ```
 
 ### Playback Notification

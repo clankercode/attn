@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sync"
 	"syscall"
@@ -279,5 +280,19 @@ func testWAVData() []byte {
 		'd', 'a', 't', 'a',
 		4, 0, 0, 0,
 		0, 0, 0, 0,
+	}
+}
+
+func TestInterruptSignalsSkipsInheritedIgnores(t *testing.T) {
+	signal.Ignore(syscall.SIGHUP)
+	t.Cleanup(func() { signal.Reset(syscall.SIGHUP) })
+
+	for _, s := range interruptSignals() {
+		if s == syscall.SIGHUP {
+			t.Fatal("ignored SIGHUP must not be caught (would un-ignore it under nohup)")
+		}
+	}
+	if got := interruptSignals(); len(got) != 2 {
+		t.Fatalf("expected SIGINT and SIGTERM, got %v", got)
 	}
 }

@@ -445,6 +445,21 @@ Config file (~/.config/attn/config.yaml):
 `)
 }
 
+// parseLinger parses a non-negative Go duration; empty is "unset" and an
+// invalid value warns on stderr and is ignored.
+func parseLinger(name, v string) (time.Duration, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, false
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		fmt.Fprintf(os.Stderr, "warning: ignoring invalid %s %q\n", name, v)
+		return 0, false
+	}
+	return d, true
+}
+
 // NotifySettings resolves whether to show the playback notification and how
 // long it lingers. ATTN_NOTIFY_LINGER and ATTN_NO_NOTIFY=1 override the
 // config file.
@@ -454,20 +469,12 @@ func NotifySettings(cfg *ConfigFile) (enabled bool, linger time.Duration) {
 		if cfg.Notify.Enabled != nil {
 			enabled = *cfg.Notify.Enabled
 		}
-		if v := strings.TrimSpace(cfg.Notify.Linger); v != "" {
-			if d, err := time.ParseDuration(v); err == nil && d >= 0 {
-				linger = d
-			} else {
-				fmt.Fprintf(os.Stderr, "warning: ignoring invalid notify.linger %q\n", v)
-			}
+		if d, ok := parseLinger("notify.linger", cfg.Notify.Linger); ok {
+			linger = d
 		}
 	}
-	if v := strings.TrimSpace(os.Getenv("ATTN_NOTIFY_LINGER")); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
-			linger = d
-		} else {
-			fmt.Fprintf(os.Stderr, "warning: ignoring invalid ATTN_NOTIFY_LINGER %q\n", v)
-		}
+	if d, ok := parseLinger("ATTN_NOTIFY_LINGER", os.Getenv("ATTN_NOTIFY_LINGER")); ok {
+		linger = d
 	}
 	if os.Getenv("ATTN_NO_NOTIFY") == "1" {
 		enabled = false

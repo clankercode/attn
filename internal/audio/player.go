@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/mp3"
@@ -136,6 +137,8 @@ func playFilePCM(ctx context.Context, path, sink string) error {
 func playFileDirect(ctx context.Context, path, sink string) error {
 	name, args := fileSinkCommand(sink, path)
 	cmd := exec.CommandContext(ctx, name, args...)
+	// Bound Wait after cancel even if a sink grandchild keeps our pipes open.
+	cmd.WaitDelay = time.Second
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
@@ -211,6 +214,8 @@ func playbackCommand(sink string, sampleRate beep.SampleRate) (string, []string)
 func streamToSink(ctx context.Context, streamer beep.Streamer, format beep.Format, sink string) error {
 	name, args := playbackCommand(sink, format.SampleRate)
 	cmd := exec.CommandContext(ctx, name, args...)
+	// Bound Wait after cancel even if a sink grandchild keeps our pipes open.
+	cmd.WaitDelay = time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("open playback stdin: %w", err)
@@ -281,6 +286,19 @@ func playDetached(path string, meta notify.Meta, release func()) error {
 	return runWithNotification(path, meta, release, reacquireLock)
 }
 
+// interruptSignals lists the signals that should stop playback, skipping any
+// the process inherited as ignored: signal.Notify would otherwise un-ignore
+// them, so `nohup attn --fg` would die on SIGHUP.
+func interruptSignals() []os.Signal {
+	var out []os.Signal
+	for _, s := range []os.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP} {
+		if !signal.Ignored(s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // Interrupted is returned when a signal ended playback; the notification
 // has been closed by then.
 type Interrupted struct{ Signal syscall.Signal }
@@ -292,10 +310,13 @@ func (e *Interrupted) ExitCode() int { return 128 + int(e.Signal) }
 
 // runWithNotification plays path with its notification. SIGINT, SIGTERM and
 // SIGHUP stop playback and close the notification (instead of leaving it up
-// with dead buttons), then yield *Interrupted.
+// with dead buttons), then yield *Interrupted. Signals ignored at startup
+// (nohup, background jobs in scripts) stay ignored.
 func runWithNotification(path string, meta notify.Meta, release func(), reacquire func() (func(), error)) error {
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	if catch := interruptSignals(); len(catch) > 0 {
+		signal.Notify(sigs, catch...)
+	}
 	interrupted := make(chan struct{})
 	finished, watched := make(chan struct{}), make(chan struct{})
 	var sig os.Signal
