@@ -297,12 +297,12 @@ func TestNotifySettings(t *testing.T) {
 		enabled bool
 		linger  time.Duration
 	}{
-		{"defaults", nil, "", true, 15 * time.Minute},
+		{"defaults", nil, "", true, 2 * time.Second},
 		{"custom linger", &ConfigFile{Notify: NotifyConfig{Linger: "90s"}}, "", true, 90 * time.Second},
 		{"zero linger", &ConfigFile{Notify: NotifyConfig{Linger: "0"}}, "", true, 0},
-		{"invalid linger keeps default", &ConfigFile{Notify: NotifyConfig{Linger: "soon"}}, "", true, 15 * time.Minute},
-		{"disabled in config", &ConfigFile{Notify: NotifyConfig{Enabled: &off}}, "", false, 15 * time.Minute},
-		{"env overrides config", &ConfigFile{Notify: NotifyConfig{Enabled: &on}}, "1", false, 15 * time.Minute},
+		{"invalid linger keeps default", &ConfigFile{Notify: NotifyConfig{Linger: "soon"}}, "", true, 2 * time.Second},
+		{"disabled in config", &ConfigFile{Notify: NotifyConfig{Enabled: &off}}, "", false, 2 * time.Second},
+		{"env overrides config", &ConfigFile{Notify: NotifyConfig{Enabled: &on}}, "1", false, 2 * time.Second},
 	}
 	for _, tc := range cases {
 		t.Setenv("ATTN_NO_NOTIFY", tc.env)

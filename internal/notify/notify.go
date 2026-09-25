@@ -25,20 +25,34 @@ const maxEnvText = 16 << 10
 
 // DefaultLinger is how long the notification (and its Replay / Close /
 // Copy text buttons) stays live after playback ends.
-const DefaultLinger = 15 * time.Minute
+const DefaultLinger = 2 * time.Second
 
-// Action keys used in Notify actions and ActionInvoked signals.
+// Action keys used in Notify actions and ActionInvoked signals. The spec's
+// special "default" key is what a click on the notification body invokes;
+// attn maps it to Copy.
 const (
-	ActionStop   = "stop"
-	ActionReplay = "replay"
-	ActionClose  = "close"
-	ActionCopy   = "copy"
+	ActionStop    = "stop"
+	ActionReplay  = "replay"
+	ActionClose   = "close"
+	ActionCopy    = "copy"
+	ActionDefault = "default"
 )
 
+// playingActions is the button row while speaking: Stop, Copy text, plus
+// the body-click default (Copy).
+func playingActions() []string {
+	return []string{
+		ActionDefault, "Copy",
+		ActionStop, "Stop",
+		ActionCopy, "Copy text",
+	}
+}
+
 // lingerActions is the button row after playback, including after Stop:
-// Replay, Close, Copy text.
+// Replay, Close, Copy text, plus the body-click default (Copy).
 func lingerActions() []string {
 	return []string{
+		ActionDefault, "Copy",
 		ActionReplay, "Replay",
 		ActionClose, "Close",
 		ActionCopy, "Copy text",
@@ -106,6 +120,8 @@ const (
 	PhaseStopped
 	// PhaseBusy is PhaseDone after a Replay found other audio playing.
 	PhaseBusy
+	// PhaseSkipped is a message dropped because other audio was playing.
+	PhaseSkipped
 )
 
 // Spec is one fully-resolved org.freedesktop.Notifications.Notify call.
@@ -153,25 +169,26 @@ func Build(m Meta, p Phase, markup bool) Spec {
 	switch p {
 	case PhasePlaying:
 		s.Icon = "audio-volume-high"
-		s.Summary = "🔊 " + project
-		s.Actions = []string{ActionStop, "Stop", ActionCopy, "Copy text"}
+		s.Summary = "Speaking — " + project
+		s.Actions = playingActions()
 		// Stay up while speaking so Stop is reachable; replaced at the end.
 		s.Timeout = 0
-	case PhaseDone, PhaseStopped, PhaseBusy:
+	case PhaseDone, PhaseStopped, PhaseBusy, PhaseSkipped:
 		s.Icon = "dialog-information"
-		s.Summary = project
+		s.Summary = "Finished — " + project
 		switch p {
 		case PhaseStopped:
-			s.Summary += " (stopped)"
+			s.Summary = "Stopped — " + project
 		case PhaseBusy:
-			s.Summary += " (busy, try Replay again)"
+			s.Summary = "Busy — " + project + " (try Replay again)"
+		case PhaseSkipped:
+			s.Summary = "Skipped — " + project
 		}
 		s.Actions = lingerActions()
 		s.Timeout = -1
 	}
 	if m.Alert {
 		s.Icon = "dialog-warning"
-		s.Summary = "⚠ " + s.Summary
 	}
 	return s
 }

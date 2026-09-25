@@ -16,10 +16,10 @@ func TestBuildPlayingShowsFullEscapedTextAndStopCopy(t *testing.T) {
 	if !strings.HasSuffix(s.Body, "a &lt; b &amp;&amp; c &gt; d") || len(s.Body) < len(long) {
 		t.Fatalf("body must be the full, escaped message; got %q", s.Body[len(s.Body)-40:])
 	}
-	if s.Summary != "🔊 hark" {
+	if s.Summary != "Speaking — hark" {
 		t.Fatalf("summary = %q", s.Summary)
 	}
-	wantActions := []string{ActionStop, "Stop", ActionCopy, "Copy text"}
+	wantActions := playingActions()
 	if strings.Join(s.Actions, ",") != strings.Join(wantActions, ",") {
 		t.Fatalf("actions = %v", s.Actions)
 	}
@@ -39,23 +39,27 @@ func TestBuildPlayingShowsFullEscapedTextAndStopCopy(t *testing.T) {
 
 func TestBuildNoMarkupLeavesTextRaw(t *testing.T) {
 	s := Build(Meta{Text: "a < b"}, PhasePlaying, false)
-	if s.Body != "a < b" || s.Summary != "🔊 attn" {
+	if s.Body != "a < b" || s.Summary != "Speaking — attn" {
 		t.Fatalf("body=%q summary=%q", s.Body, s.Summary)
 	}
 }
 
-func TestBuildDoneStoppedAndAlert(t *testing.T) {
-	want := []string{ActionReplay, "Replay", ActionClose, "Close", ActionCopy, "Copy text"}
+func TestBuildDoneStoppedSkippedAndAlert(t *testing.T) {
+	want := lingerActions()
 	done := Build(Meta{Text: "x", Project: "p"}, PhaseDone, true)
-	if done.Summary != "p" || done.Timeout != -1 || strings.Join(done.Actions, ",") != strings.Join(want, ",") {
+	if done.Summary != "Finished — p" || done.Timeout != -1 || strings.Join(done.Actions, ",") != strings.Join(want, ",") {
 		t.Fatalf("done = %+v", done)
 	}
 	stopped := Build(Meta{Text: "x", Project: "p"}, PhaseStopped, true)
-	if stopped.Summary != "p (stopped)" || strings.Join(stopped.Actions, ",") != strings.Join(want, ",") {
+	if stopped.Summary != "Stopped — p" || strings.Join(stopped.Actions, ",") != strings.Join(want, ",") {
 		t.Fatalf("stopped = %+v", stopped)
 	}
+	skipped := Build(Meta{Text: "x", Project: "p"}, PhaseSkipped, true)
+	if skipped.Summary != "Skipped — p" || strings.Join(skipped.Actions, ",") != strings.Join(want, ",") || skipped.Timeout != -1 {
+		t.Fatalf("skipped = %+v", skipped)
+	}
 	alert := Build(Meta{Text: "x", Project: "p", Alert: true}, PhasePlaying, true)
-	if alert.Hints["urgency"] != byte(2) || !strings.HasPrefix(alert.Summary, "⚠ ") || alert.Icon != "dialog-warning" {
+	if alert.Hints["urgency"] != byte(2) || alert.Summary != "Speaking — p" || alert.Icon != "dialog-warning" {
 		t.Fatalf("alert = %+v", alert)
 	}
 }
@@ -102,8 +106,7 @@ func TestWhereUsesRepoNameAndWorktree(t *testing.T) {
 
 func TestBuildBusy(t *testing.T) {
 	s := Build(Meta{Text: "x", Project: "p"}, PhaseBusy, true)
-	want := []string{ActionReplay, "Replay", ActionClose, "Close", ActionCopy, "Copy text"}
-	if s.Summary != "p (busy, try Replay again)" || strings.Join(s.Actions, ",") != strings.Join(want, ",") {
+	if s.Summary != "Busy — p (try Replay again)" || strings.Join(s.Actions, ",") != strings.Join(lingerActions(), ",") {
 		t.Fatalf("busy = %+v", s)
 	}
 }

@@ -27,12 +27,14 @@ import (
 const (
 	detachedPlaybackEnv    = "ATTN_DETACHED_PLAYBACK"
 	detachedPlaybackLockFD = 3
+	skippedNotificationEnv = "ATTN_NOTIFY_SKIPPED"
 )
 
 // Test seams.
 var (
 	playFileFn            = playFile
 	spawnDetachedPlayback = startDetachedPlayback
+	spawnSkippedNotifier  = startSkippedNotifier
 	connectNotify         = notify.Connect
 	copyText              = notify.CopyText
 	// reacquireLock never waits: Replay while other audio plays reports
@@ -252,6 +254,14 @@ func streamToSink(ctx context.Context, streamer beep.Streamer, format beep.Forma
 }
 
 func HandleDetachedPlayback(args []string) (bool, error) {
+	if os.Getenv(skippedNotificationEnv) == "1" {
+		meta := notify.DecodeMeta(os.Getenv(notify.MetaEnv))
+		os.Unsetenv(notify.MetaEnv)
+		os.Unsetenv(skippedNotificationEnv)
+		// Short-lived, but don't pin the caller's directory either.
+		_ = os.Chdir("/")
+		return true, runSkippedNotification(meta)
+	}
 	if os.Getenv(detachedPlaybackEnv) != "1" {
 		return false, nil
 	}
@@ -290,6 +300,45 @@ func playDetached(path string, meta notify.Meta, release func()) error {
 	return runWithNotification(path, meta, release, reacquireLock)
 }
 
+// runSkippedNotification shows the popup for a message that was dropped
+// because other audio was playing, then lingers with its Replay / Close /
+// Copy text buttons.
+func runSkippedNotification(meta notify.Meta) error {
+	return withPlaybackSignals(func(done <-chan struct{}) error {
+		return notify.RunSkipped(meta, notify.Deps{
+			Connect:   connectNotify,
+			Reacquire: reacquireLock,
+			Copy:      copyText,
+			Done:      done,
+		})
+	})
+}
+
+// startSkippedNotifier leaves a detached child showing the skipped-message
+// notification, so the caller can return immediately.
+func startSkippedNotifier(meta notify.Meta) error {
+	if meta.Disabled || meta.Linger <= 0 {
+		return nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+	// Don't leak fds inherited from our caller into the child.
+	closeInheritedFDsOnExec()
+	env := append(os.Environ(), skippedNotificationEnv+"=1", notify.MetaEnv+"="+meta.Encode())
+	cmd := exec.Command(exe)
+	cmd.Env = env
+	// /dev/null, not pipes: the child outlives us, and a write to a pipe
+	// whose reader has exited would SIGPIPE it.
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start skipped notification: %w", err)
+	}
+	return nil
+}
+
 // interruptSignals lists the signals that should stop playback, skipping any
 // the process inherited as ignored: signal.Notify would otherwise un-ignore
 // them, so `nohup attn --fg` would die on SIGHUP.
@@ -317,6 +366,22 @@ func (e *Interrupted) ExitCode() int { return 128 + int(e.Signal) }
 // with dead buttons), then yield *Interrupted. Signals ignored at startup
 // (nohup, background jobs in scripts) stay ignored.
 func runWithNotification(path string, meta notify.Meta, release func(), reacquire func() (func(), error)) error {
+	return withPlaybackSignals(func(done <-chan struct{}) error {
+		return notify.Run(meta, notify.Deps{
+			Connect:   connectNotify,
+			Play:      func(ctx context.Context) error { return playFileFn(ctx, path) },
+			Release:   release,
+			Reacquire: reacquire,
+			Copy:      copyText,
+			Done:      done,
+		})
+	})
+}
+
+// withPlaybackSignals runs fn with a channel that closes on SIGINT, SIGTERM
+// or SIGHUP, so playback and its notification stop together. A signal maps
+// to *Interrupted; signals ignored at startup stay ignored.
+func withPlaybackSignals(fn func(done <-chan struct{}) error) error {
 	sigs := make(chan os.Signal, 1)
 	if catch := interruptSignals(); len(catch) > 0 {
 		signal.Notify(sigs, catch...)
@@ -333,14 +398,7 @@ func runWithNotification(path string, meta notify.Meta, release func(), reacquir
 		}
 	}()
 
-	err := notify.Run(meta, notify.Deps{
-		Connect:   connectNotify,
-		Play:      func(ctx context.Context) error { return playFileFn(ctx, path) },
-		Release:   release,
-		Reacquire: reacquire,
-		Copy:      copyText,
-		Done:      interrupted,
-	})
+	err := fn(interrupted)
 	signal.Stop(sigs)
 	close(finished)
 	<-watched
@@ -457,6 +515,9 @@ func PlayAndSave(data []byte, outputPath string, doPlay bool, fg bool, waitForLo
 		if lockErr != nil {
 			if errors.Is(lockErr, ErrAlreadyPlaying) {
 				fmt.Printf("Audio already playing, skipping.\n")
+				// The message still exists on disk; leave a Skipped popup
+				// offering Replay / Close / Copy text.
+				_ = spawnSkippedNotifier(meta)
 				return nil
 			}
 			return fmt.Errorf("lock: %w", lockErr)

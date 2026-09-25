@@ -78,17 +78,20 @@ attn --fg "Wait for this to finish"
 
 On Linux desktops with a notification daemon, playback shows a notification
 with the **full message** as the body and the calling project (git repo name,
-plus the worktree name when inside `.worktrees/`) as the title. KDE also shows
+plus the worktree name when inside `.worktrees/`) in the title. KDE also shows
 the caller's directory as the origin. Alerts (`--alert`) use critical urgency.
+The title carries the state — **Speaking**, **Stopped**, **Finished** — and a
+message dropped because other audio is playing gets a **Skipped** popup.
 
 While speaking the buttons are **Stop**, **Copy text**. After Stop, or when
 playback finishes, they become **Replay**, **Close**, **Copy text** and stay
-for `notify.linger` (default 15m).
+for `notify.linger` (default 2s). Clicking the notification body copies the
+message at any time.
 
 - **Stop** stops this audio only; other `attn` commands are unaffected.
 - **Replay** plays it again if nothing else is playing; otherwise the notification says busy.
 - **Close** dismisses the notification now and the linger process exits.
-- **Copy text** copies the message to the clipboard (`wl-copy` / `xclip`).
+- **Copy text** copies the message to the clipboard (`wl-copy` / `xclip`); the title confirms **Copied** / **Copy failed**.
 
 Dismissing the notification while it speaks keeps the audio going but ends the
 notification. Once the linger window ends the notification closes itself; the
@@ -100,12 +103,13 @@ script), background playback moves into its own transient scope via
 audio off or close the notification.
 
 If desktop notifications are unavailable, playback proceeds normally.
-Each lingering message is a small background `attn` process (~16 MB) holding
-its Replay / Close / Copy text buttons; **Close**, dismissing the popup, or a
-shorter `notify.linger` / `ATTN_NOTIFY_LINGER` frees it sooner.
+Each message's popup is a small background `attn` process (~16 MB) that exits
+when its popup closes — by **Close**, dismissal, or the linger window
+(`notify.linger` / `ATTN_NOTIFY_LINGER`).
 
 Only one message plays at a time: while a message (or a replay) is speaking,
-new `attn` calls without `--wait` are skipped. The linger itself holds no lock.
+new `attn` calls without `--wait` are skipped — the skipped message gets its
+own **Skipped** popup with Replay / Close / Copy text. The linger holds no lock.
 
 ### Dry Run
 
@@ -185,7 +189,7 @@ mimo:
 
 notify:
   enabled: true      # desktop notification during playback (ATTN_NO_NOTIFY=1 disables)
-  linger: 15m        # keep Replay / Close / Copy text live after playback; 0 closes at playback end
+  linger: 2s        # keep Replay / Close / Copy text live after playback; 0 closes at playback end
 ```
 
 **Selection rules**

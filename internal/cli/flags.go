@@ -406,8 +406,10 @@ Defaults:
              explicit --provider / TTS_PROVIDER does not fall back)
   voice: random from preferred pool (minus banned), or fixed alert_voice for --alert
   output: ~/.tts-output/<unique timestamp>.mp3 (or .wav for groq/mimo)
-  notification: shows the full message with Stop / Copy text while speaking,
-           then Replay / Close / Copy text for notify.linger (default 15m; ATTN_NOTIFY_LINGER overrides);
+  notification: shows the full message with Stop / Copy text while speaking
+           (clicking the body copies), then Replay / Close / Copy text for
+           notify.linger (default 2s; ATTN_NOTIFY_LINGER overrides); a message
+           skipped because audio is busy gets its own popup;
            ATTN_NO_NOTIFY=1 to disable
   history: JSONL at $XDG_DATA_HOME/attn/history.jsonl (ATTN_NO_HISTORY=1 to disable)
            records text, provider, voice, cwd, and path; older entries without cwd still load
@@ -441,7 +443,7 @@ Config file (~/.config/attn/config.yaml):
     alert_voice: rex
   notify:
     enabled: true                 # desktop notification during playback
-    linger: 15m                   # keep Replay / Close / Copy text live after playback; 0 closes at end
+    linger: 2s                    # keep Replay / Close / Copy text live after playback; 0 closes at end
 `)
 }
 

@@ -148,6 +148,36 @@ func TestForegroundPlayAndSaveCallsForegroundPlayer(t *testing.T) {
 	}
 }
 
+func TestPlayAndSaveWhileBusyLeavesSkippedNotification(t *testing.T) {
+	useTempLockDir(t)
+	held, err := AcquireLock()
+	if err != nil {
+		t.Fatalf("AcquireLock: %v", err)
+	}
+	t.Cleanup(func() { held.Release() })
+
+	originalSpawn := spawnSkippedNotifier
+	var skipped []notify.Meta
+	spawnSkippedNotifier = func(meta notify.Meta) error {
+		skipped = append(skipped, meta)
+		return nil
+	}
+	t.Cleanup(func() { spawnSkippedNotifier = originalSpawn })
+
+	outputPath := filepath.Join(t.TempDir(), "sample.wav")
+	meta := notify.Meta{Text: "busy message", Project: "p", Linger: notify.DefaultLinger}
+	err = PlayAndSave(testWAVData(), outputPath, true, false, false, meta)
+	if err != nil {
+		t.Fatalf("PlayAndSave() error = %v", err)
+	}
+	if len(skipped) != 1 || skipped[0].Text != "busy message" {
+		t.Fatalf("skipped notifications = %+v", skipped)
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("audio must still be saved: %v", err)
+	}
+}
+
 // fakeServer is a minimal notify.Server that invokes an action as soon as
 // a notification with that action is shown.
 type fakeServer struct {

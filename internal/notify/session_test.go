@@ -94,7 +94,7 @@ func TestStopThenLingerTimeoutClosesNotification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got := srv.summaries(); len(got) != 2 || got[1] != "p (stopped)" {
+	if got := srv.summaries(); len(got) != 2 || got[1] != "Stopped — p" {
 		t.Fatalf("summaries = %v", got)
 	}
 	if released != 1 || len(srv.closed) != 1 || srv.closed[0] != 42 || !srv.shutdown {
@@ -134,10 +134,10 @@ func TestCopyDuringPlaybackAndAfter(t *testing.T) {
 func TestReplayReacquiresLockAndPlaysAgain(t *testing.T) {
 	srv := newFake()
 	srv.onShow = func(id uint32, s Spec) {
-		if s.Actions[0] == ActionReplay && len(srv.shown) == 2 {
+		switch len(srv.shown) {
+		case 2: // finished: replay
 			srv.events <- Event{ID: id, Action: ActionReplay}
-		}
-		if s.Actions[0] == ActionReplay && len(srv.shown) == 4 {
+		case 4: // finished again: dismiss
 			srv.events <- Event{ID: id, Closed: true}
 		}
 	}
@@ -191,7 +191,7 @@ func TestReplayBusyShowsBusyAndKeepsLingering(t *testing.T) {
 		t.Fatalf("err=%v plays=%d attempts=%d", err, plays, attempts)
 	}
 	got := srv.summaries()
-	want := []string{"🔊 p", "p", "p (busy, try Replay again)", "🔊 p", "p"}
+	want := []string{"Speaking — p", "Finished — p", "Busy — p (try Replay again)", "Speaking — p", "Finished — p"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("summaries = %q, want %q", got, want)
 	}
@@ -224,7 +224,7 @@ func TestCloseDuringLingerEndsSession(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Close must end the linger instead of waiting out the timer")
 	}
-	if len(srv.shown) != 2 || srv.shown[1].Summary != "p" {
+	if len(srv.shown) != 2 || srv.shown[1].Summary != "Finished — p" {
 		t.Fatalf("summaries = %v", srv.summaries())
 	}
 	if strings.Join(srv.shown[1].Actions, ",") != strings.Join(lingerActions(), ",") {
@@ -262,7 +262,7 @@ func TestCloseAfterStopEndsSession(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Close after Stop must end the linger")
 	}
-	if got := srv.summaries(); len(got) != 2 || got[1] != "p (stopped)" {
+	if got := srv.summaries(); len(got) != 2 || got[1] != "Stopped — p" {
 		t.Fatalf("summaries = %v", got)
 	}
 	if strings.Join(srv.shown[1].Actions, ",") != strings.Join(lingerActions(), ",") {
@@ -457,7 +457,7 @@ func TestReplayOtherErrorKeepsLingeringWithoutBusy(t *testing.T) {
 	if err != nil || plays != 1 {
 		t.Fatalf("err=%v plays=%d", err, plays)
 	}
-	if got := srv.summaries(); strings.Join(got, "|") != "🔊 p|p" {
+	if got := srv.summaries(); strings.Join(got, "|") != "Speaking — p|Finished — p" {
 		t.Fatalf("summaries = %q (a non-busy error must not claim busy)", got)
 	}
 }
@@ -575,3 +575,176 @@ type shutdownServer struct {
 }
 
 func (s *shutdownServer) Shutdown() { close(s.shutdown) }
+
+// shortCopyNote makes the Copied / Copy failed title revert quickly.
+func shortCopyNote(t *testing.T) {
+	t.Helper()
+	orig := copyNoteTime
+	copyNoteTime = 10 * time.Millisecond
+	t.Cleanup(func() { copyNoteTime = orig })
+}
+
+func TestDefaultActionCopiesDuringPlayback(t *testing.T) {
+	shortCopyNote(t)
+	srv := newFake()
+	var copied []string
+	srv.onShow = func(id uint32, s Spec) {
+		switch len(srv.shown) {
+		case 1: // speaking: click the body
+			srv.events <- Event{ID: id, Action: ActionDefault}
+		case 3: // title restored: stop
+			srv.events <- Event{ID: id, Action: ActionStop}
+		case 4: // finished: dismiss
+			srv.events <- Event{ID: id, Closed: true}
+		}
+	}
+	err := Run(Meta{Text: "the text", Project: "p", Linger: time.Hour}, Deps{
+		Connect: serve(srv), Play: blockUntilCancel, Release: func() {},
+		Copy:  func(s string) error { copied = append(copied, s); return nil },
+		After: lingerNever,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(copied) != 1 || copied[0] != "the text" {
+		t.Fatalf("copied = %v", copied)
+	}
+	want := []string{"Speaking — p", "Copied", "Speaking — p", "Stopped — p"}
+	if got := srv.summaries(); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("summaries = %q, want %q", got, want)
+	}
+}
+
+func TestCopyNoteRevertsToPhaseTitle(t *testing.T) {
+	shortCopyNote(t)
+	srv := newFake()
+	srv.onShow = func(id uint32, s Spec) {
+		switch len(srv.shown) {
+		case 2: // finished: copy
+			srv.events <- Event{ID: id, Action: ActionCopy}
+		case 4: // title restored: dismiss
+			srv.events <- Event{ID: id, Closed: true}
+		}
+	}
+	err := Run(Meta{Text: "m", Project: "p", Linger: time.Hour}, Deps{
+		Connect: serve(srv), Play: srv.playShown(nil),
+		Copy:  func(string) error { return nil },
+		After: lingerNever,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := []string{"Speaking — p", "Finished — p", "Copied", "Finished — p"}
+	if got := srv.summaries(); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("summaries = %q, want %q", got, want)
+	}
+}
+
+func TestCopyFailureNotesCopyFailed(t *testing.T) {
+	srv := newFake()
+	srv.onShow = func(id uint32, s Spec) {
+		switch len(srv.shown) {
+		case 2: // finished: copy fails
+			srv.events <- Event{ID: id, Action: ActionCopy}
+		case 3: // failure note: dismiss
+			srv.events <- Event{ID: id, Closed: true}
+		}
+	}
+	err := Run(Meta{Text: "m", Project: "p", Linger: time.Hour}, Deps{
+		Connect: serve(srv), Play: srv.playShown(nil),
+		Copy:  func(string) error { return errors.New("no clipboard tool") },
+		After: lingerNever,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := []string{"Speaking — p", "Finished — p", "Copy failed"}
+	if got := srv.summaries(); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("summaries = %q, want %q", got, want)
+	}
+}
+
+func TestRunSkippedShowsPopupAndCloseEnds(t *testing.T) {
+	srv := newFake()
+	srv.onShow = func(id uint32, s Spec) {
+		if len(srv.shown) == 1 {
+			srv.events <- Event{ID: id, Action: ActionClose}
+		}
+	}
+	err := RunSkipped(Meta{Text: "m", Project: "p", Linger: time.Minute}, Deps{
+		Connect:   serve(srv),
+		Reacquire: func() (func(), error) { return nil, ErrBusy },
+		After:     lingerNever,
+	})
+	if err != nil {
+		t.Fatalf("RunSkipped: %v", err)
+	}
+	if got := srv.summaries(); strings.Join(got, "|") != "Skipped — p" {
+		t.Fatalf("summaries = %q", got)
+	}
+	if len(srv.closed) != 1 || !srv.shutdown {
+		t.Fatalf("closed=%v shutdown=%v", srv.closed, srv.shutdown)
+	}
+}
+
+func TestRunSkippedWithoutLingerShowsNothing(t *testing.T) {
+	srv := newFake()
+	err := RunSkipped(Meta{Text: "m", Linger: 0}, Deps{Connect: serve(srv)})
+	if err != nil || len(srv.shown) != 0 {
+		t.Fatalf("err=%v shown=%q", err, srv.summaries())
+	}
+}
+
+func TestRunSkippedReplayBusyKeepsOffering(t *testing.T) {
+	srv := newFake()
+	srv.onShow = func(id uint32, s Spec) {
+		switch len(srv.shown) {
+		case 1: // skipped: replay is refused
+			srv.events <- Event{ID: id, Action: ActionReplay}
+		case 2: // busy: close
+			srv.events <- Event{ID: id, Action: ActionClose}
+		}
+	}
+	attempts := 0
+	err := RunSkipped(Meta{Text: "m", Project: "p", Linger: time.Minute}, Deps{
+		Connect: serve(srv),
+		Reacquire: func() (func(), error) {
+			attempts++
+			return nil, ErrBusy
+		},
+		After: lingerNever,
+	})
+	if err != nil || attempts != 1 {
+		t.Fatalf("err=%v attempts=%d", err, attempts)
+	}
+	want := []string{"Skipped — p", "Busy — p (try Replay again)"}
+	if got := srv.summaries(); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("summaries = %q, want %q", got, want)
+	}
+}
+
+func TestRunSkippedReplayPlaysWhenFree(t *testing.T) {
+	srv := newFake()
+	srv.onShow = func(id uint32, s Spec) {
+		switch len(srv.shown) {
+		case 1: // skipped: replay goes ahead
+			srv.events <- Event{ID: id, Action: ActionReplay}
+		case 3: // finished after the replay: dismiss
+			srv.events <- Event{ID: id, Closed: true}
+		}
+	}
+	plays := 0
+	err := RunSkipped(Meta{Text: "m", Project: "p", Linger: time.Minute}, Deps{
+		Connect:   serve(srv),
+		Play:      func(ctx context.Context) error { plays++; return srv.playShown(nil)(ctx) },
+		Reacquire: func() (func(), error) { return func() {}, nil },
+		After:     lingerNever,
+	})
+	if err != nil || plays != 1 {
+		t.Fatalf("err=%v plays=%d", err, plays)
+	}
+	want := []string{"Skipped — p", "Speaking — p", "Finished — p"}
+	if got := srv.summaries(); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("summaries = %q, want %q", got, want)
+	}
+}

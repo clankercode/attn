@@ -60,28 +60,8 @@ type Deps struct {
 // then Replay / Close / Copy text for m.Linger before closing it. Playback
 // errors are returned; a user Stop, Close, or Done is not an error.
 func Run(m Meta, d Deps) error {
-	s := &session{m: m, d: d, release: d.Release}
-	if s.d.After == nil {
-		s.d.After = time.After
-	}
+	s := newSession(m, d)
 	defer s.cleanup()
-	return s.run()
-}
-
-type session struct {
-	m   Meta
-	d   Deps
-	srv Server // nil until connected, or when there is no UI
-	// pending delivers the server while Connect is still running.
-	pending <-chan Server
-	id      uint32
-	gone    bool // server closed our notification; show no more UI
-	broken  bool // a Show failed or timed out; show no more UI
-	dead    bool // event stream ended
-	release func()
-}
-
-func (s *session) run() error {
 	s.connect()
 	for {
 		stopped, err := s.playOnce()
@@ -104,6 +84,78 @@ func (s *session) run() error {
 			return nil
 		}
 	}
+}
+
+// RunSkipped shows the notification for a message that was dropped because
+// other audio was playing (Replay / Close / Copy text), without playing
+// first. A Replay that finds the audio free plays the message normally.
+func RunSkipped(m Meta, d Deps) error {
+	if m.Disabled || m.Linger <= 0 {
+		return nil
+	}
+	s := newSession(m, d)
+	defer s.cleanup()
+	s.connect()
+	if !s.awaitServer() || !s.ui() {
+		return nil
+	}
+	s.show(PhaseSkipped)
+	if s.id == 0 {
+		return nil
+	}
+	for {
+		if !s.linger() {
+			return nil
+		}
+		stopped, err := s.playOnce()
+		if err != nil || s.interrupted() || s.m.Linger <= 0 {
+			return err
+		}
+		if !s.ui() {
+			return nil
+		}
+		phase := PhaseDone
+		if stopped {
+			phase = PhaseStopped
+		}
+		s.show(phase)
+		if !s.ui() || s.id == 0 {
+			return nil
+		}
+	}
+}
+
+func newSession(m Meta, d Deps) *session {
+	if d.After == nil {
+		d.After = time.After
+	}
+	return &session{
+		m:       m,
+		d:       d,
+		release: d.Release,
+		revert:  make(chan struct{}, 1),
+	}
+}
+
+// copyNoteTime is how long a Copied / Copy failed title stays before the
+// phase title returns. Test seam.
+var copyNoteTime = 2 * time.Second
+
+type session struct {
+	m   Meta
+	d   Deps
+	srv Server // nil until connected, or when there is no UI
+	// pending delivers the server while Connect is still running.
+	pending <-chan Server
+	id      uint32
+	phase   Phase // last phase shown; the copy note reverts to it
+	gone    bool  // server closed our notification; show no more UI
+	broken  bool  // a Show failed or timed out; show no more UI
+	dead    bool  // event stream ended
+	release func()
+	// revert carries the copy-note timer's request to restore the title.
+	revert    chan struct{}
+	noteTimer *time.Timer
 }
 
 // connect starts opening the notification server in the background.
@@ -179,6 +231,8 @@ func (s *session) playOnce() (stopped bool, err error) {
 				return true, nil
 			}
 			return false, err
+		case <-s.revert:
+			s.show(PhasePlaying)
 		case ev, ok := <-s.events():
 			if !ok {
 				s.lost()
@@ -194,7 +248,7 @@ func (s *session) playOnce() (stopped bool, err error) {
 			case ev.Action == ActionStop:
 				stopped = true
 				cancel()
-			case ev.Action == ActionCopy:
+			case ev.Action == ActionCopy || ev.Action == ActionDefault:
 				s.copy()
 			}
 		}
@@ -210,6 +264,8 @@ func (s *session) linger() bool {
 			return false
 		case <-s.d.Done:
 			return false
+		case <-s.revert:
+			s.show(s.phase)
 		case ev, ok := <-s.events():
 			if !ok {
 				s.lost()
@@ -222,7 +278,7 @@ func (s *session) linger() bool {
 			case ev.Closed:
 				s.gone = true
 				return false
-			case ev.Action == ActionCopy:
+			case ev.Action == ActionCopy || ev.Action == ActionDefault:
 				s.copy()
 			case ev.Action == ActionClose:
 				return false
@@ -254,6 +310,7 @@ func (s *session) ui() bool { return s.srv != nil && !s.gone && !s.broken }
 // show creates or updates the notification. A failure (including a
 // timeout) means the server is unusable, so no further UI is attempted.
 func (s *session) show(p Phase) {
+	s.phase = p
 	if !s.ui() {
 		return
 	}
@@ -281,9 +338,38 @@ func (s *session) lost() {
 func (s *session) mine(ev Event) bool { return s.id != 0 && ev.ID == s.id }
 
 func (s *session) copy() {
-	if s.d.Copy != nil {
-		_ = s.d.Copy(s.m.Text)
+	if s.d.Copy == nil {
+		return
 	}
+	s.noteCopy(s.d.Copy(s.m.Text))
+}
+
+// noteCopy confirms a Copy press in the title (Copied / Copy failed), then
+// restores the phase title once copyNoteTime has passed.
+func (s *session) noteCopy(err error) {
+	if !s.ui() {
+		return
+	}
+	spec := Build(s.m, s.phase, s.srv.Markup())
+	spec.Summary = "Copied"
+	if err != nil {
+		spec.Summary = "Copy failed"
+	}
+	id, e := s.srv.Show(s.id, spec)
+	if e != nil {
+		s.broken = true
+		return
+	}
+	s.id = id
+	if s.noteTimer != nil {
+		s.noteTimer.Stop()
+	}
+	s.noteTimer = time.AfterFunc(copyNoteTime, func() {
+		select {
+		case s.revert <- struct{}{}:
+		default:
+		}
+	})
 }
 
 func (s *session) releaseLock() {
@@ -295,6 +381,9 @@ func (s *session) releaseLock() {
 
 func (s *session) cleanup() {
 	s.releaseLock()
+	if s.noteTimer != nil {
+		s.noteTimer.Stop()
+	}
 	if c := s.pending; c != nil {
 		// Still connecting: nothing was shown; shut the server down
 		// whenever it arrives.
